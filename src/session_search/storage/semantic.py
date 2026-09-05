@@ -4,6 +4,7 @@ SQLite keeps progress durable; NumPy is imported only by semantic operations.
 """
 
 import heapq
+import fcntl
 import time
 from dataclasses import replace
 
@@ -53,6 +54,18 @@ def prepare_chunks(catalog: Catalog):
 
 
 def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
+    if catalog.readonly:
+        raise PermissionError("standby cannot index embeddings")
+    with (catalog.root / ".embedding-background.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {"version": 1, "status": "coalesced", "embedded": 0, "failed": 0,
+                    "identity": provider.identity.key}
+        return _index_pending(catalog, provider, limit=limit)
+
+
+def _index_pending(catalog: Catalog, provider, *, limit: int) -> dict:
     import numpy as np
     if not 1 <= limit <= 10000:
         raise ValueError("embedding limit must be between 1 and 10000")
@@ -66,6 +79,7 @@ def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
         (identity, identity, time.time(), limit),
     ).fetchall()
     completed = failed = 0
+    consecutive_failures = 0
     for row in rows:
         try:
             vector = validate_vector(provider.embed(row["text"]), provider.identity.dimensions)
@@ -77,6 +91,7 @@ def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
                                    (identity, row["content_hash"]))
                 catalog.bump_publication()
             completed += 1
+            consecutive_failures = 0
         except (OSError, ValueError, KeyError, TypeError) as exc:
             with catalog.db:
                 catalog.db.execute(
@@ -87,8 +102,12 @@ def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
                 )
                 catalog.bump_publication()
             failed += 1
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                break  # Do not hammer an unavailable provider with the entire backlog.
     return {"version": 1, "status": "partial" if failed else "ok",
-            "embedded": completed, "failed": failed, "identity": identity}
+            "embedded": completed, "failed": failed, "deferred": len(rows) - completed - failed,
+            "identity": identity}
 
 
 def hybrid_search(catalog: Catalog, query, provider=None) -> dict:

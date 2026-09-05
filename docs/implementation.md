@@ -9,6 +9,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Immutable bounded context and CLI.
 - [x] Durable upload queue and complete-record capture checkpoints.
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
+- [x] Process-shared background embedding admission and bounded retries during provider outages.
 - [x] Three read-only MCP tools and authenticated HTTP transport.
 - [x] Verified snapshot creation and atomic read-only replica activation.
 - [x] Replica retention of current, previous, and actively pinned generations, including reader crash recovery.
@@ -26,7 +27,7 @@ This checklist records delivered behavior, separately from the target architectu
 
 Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.
 
-The present semantic provider limit applies per worker, not across hosts or processes. This is not yet the deployment-wide admission control required for release. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
+Background indexers share a lock on the authoritative catalog; standby catalogs cannot index. Query embeddings bypass this background lock. This bounds Session Search background ingestion across primary worker processes, but does not control unrelated applications sharing the model endpoint. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 
 Parser regression fixtures cover the extracted Codex behavior. [Legacy migration](migration.md) tests cover historical locator preservation after subsequent capture, tombstones, and conflicting or corrupt archives. Whole-corpus retrieval parity and client checkpoint reconciliation still need migration/evaluation tests. Do not infer those guarantees from the current unit tests.
 

@@ -52,3 +52,9 @@ systemctl --user enable --now session-search-replicate.timer
 The timer runs every five minutes. A publication pipeline can also start the same service after capture or embedding publication; overlapping starts do not create additional transfers. User services require a running user service manager, including after reboot. Provision that through the host's normal administration workflow.
 
 This timer only replicates searchable evidence. Credential propagation, capture scheduling, and six-hour recovery backups need separate configuration; it does not establish raw-file recovery coverage.
+
+## Background semantic indexing
+
+The primary can install `session-search-embed.service` and its timer alongside replication. Provide a private `embedding.env` containing `SESSION_SEARCH_DATA`, `SESSION_SEARCH_EMBEDDING_CONFIG`, and `SESSION_SEARCH_EMBEDDING_BATCH` (1–10000). The model configuration must identify the explicitly provisioned remote embedding service. This data-host unit does not download or start a model.
+
+Each run indexes a bounded batch, then requests replication. The timer waits 30 seconds between completed runs. A process-shared catalog lock permits only one background indexer at a time; query embeddings bypass it. Three consecutive provider failures end the batch early, leaving the remaining evidence pending. Standbys cannot run this worker. For local-only installations, use the local provider directly without this remote-model service unit.

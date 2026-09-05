@@ -1,0 +1,10 @@
+[Unit]
+Description=Process Session Search semantic work regularly
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=30s
+Unit=session-search-embed.service
+
+[Install]
+WantedBy=timers.target

@@ -52,6 +52,25 @@ def test_model_outage_preserves_new_lexical_evidence_and_retries_later(tmp_path)
         assert index_pending(catalog, FakeProvider())["embedded"] == 0
 
 
+def test_background_admission_and_outage_bound_do_not_block_queries(tmp_path):
+    import fcntl
+
+    class Offline(FakeProvider):
+        def embed(self, *args, **kwargs):
+            raise OSError("offline")
+
+    with Catalog(tmp_path) as catalog:
+        catalog.ingest(SessionRevision('s', tuple(Event(str(i), 'user', f'evidence {i}')
+                       for i in range(10))), producer='d', request_id='new')
+        with (tmp_path / '.embedding-background.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            assert index_pending(catalog, FakeProvider())['status'] == 'coalesced'
+            assert catalog.search(SearchQuery('evidence'))['results']
+        result = index_pending(catalog, Offline())
+        assert result['failed'] == 3 and result['deferred'] == 7
+        assert catalog.search(SearchQuery('evidence'))['results']
+
+
 def test_model_identity_change_never_reuses_vectors(tmp_path):
     with Catalog(tmp_path) as catalog:
         populate(catalog)
