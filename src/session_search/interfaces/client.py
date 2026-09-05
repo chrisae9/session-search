@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from session_search.core.records import canonical_json
+from session_search.core.records import canonical_json, digest
+from session_search.core.protocol import MAX_REQUEST, MAX_REVISION_UPLOAD
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -90,13 +92,29 @@ class Client:
 
     def upload(self, payload: dict) -> dict:
         # No alternate destination: a standby never becomes a writer implicitly.
+        encoded = canonical_json(payload).encode()
+        if len(encoded) > MAX_REVISION_UPLOAD:
+            raise RemoteError(413)
+        if len(encoded) > MAX_REQUEST:
+            key = digest(encoded)
+            # The durable queue retains the source payload across crashes. The
+            # server resumes the same content hash when this file is recreated.
+            with tempfile.NamedTemporaryFile(prefix="session-search-revision-") as staged:
+                staged.write(encoded)
+                staged.flush()
+                self._upload_object(Path(staged.name), key, "/v1/revision-objects/")
+            return self._request(self.primary, "/v1/revision-objects",
+                                 {"digest": key, "size": len(encoded)})
         return self._request(self.primary, "/v1/revisions", payload)
 
     def upload_raw(self, path: Path, digest: str) -> dict:
+        return self._upload_object(path, digest, "/v1/objects/")
+
+    def _upload_object(self, path: Path, digest: str, route_prefix: str) -> dict:
         from session_search.storage.transfers import MAX_CHUNK
         from session_search.storage.objects import ObjectStore
         ObjectStore(path.parent).path(digest)  # Validate the URL segment.
-        route = "/v1/objects/" + digest
+        route = route_prefix + digest
         progress = self._request(self.primary, route, None)
         total = path.stat().st_size
         if progress["status"] == "complete":

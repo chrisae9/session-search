@@ -44,6 +44,8 @@ In another shell:
 
 `--standby` adds a read-only alternate for search, context, and status. Uploads never fail over. Conflicting revisions stay queued for reconciliation; repeated connection failures back off without deleting pending payloads. A flush sends at most one pending revision per session per pass, preserving order.
 
+Normalized payloads over 8 MiB automatically use resumable 1 MiB chunks in a separate temporary namespace. A checksum-verified payload then goes through the same revision conflict and idempotency checks as an ordinary upload. Successful ingestion removes this transfer copy; it does not archive raw files. The current normalized payload ceiling is 256 MiB. Larger payloads remain in the client queue as rejected work, requiring a supported format or size change before retry. Large JSON parsing is serialized across server worker processes to bound memory use; busy clients retain their payloads and retry.
+
 ## Embeddings
 
 Use `--embedding-config` to select an explicitly provisioned provider. Configuration contains `mode`, an `identity` object with artifact and dimensions, and either `model_path` for local mode or `endpoint`, `model`, and `response_model` for remote mode. Remote credentials, when needed, use `token_file`.

@@ -1,4 +1,4 @@
-"""Immutable content-addressed raw objects. Only explicit archival calls write here."""
+"""Immutable content-addressed objects with separate archival and transfer namespaces."""
 
 import hashlib
 import os
@@ -16,8 +16,10 @@ def sync_directory(path: Path):
 
 
 class ObjectStore:
-    def __init__(self, root: Path):
-        self.root = root / "objects" / "raw"
+    def __init__(self, root: Path, *, namespace: str = "raw"):
+        if namespace not in {"raw", "revision-upload"}:
+            raise ValueError("unsupported object namespace")
+        self.root = root / "objects" / namespace
 
     def path(self, digest: str) -> Path:
         if not re.fullmatch("[0-9a-f]{64}", digest):

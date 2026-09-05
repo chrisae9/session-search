@@ -17,10 +17,11 @@ class OffsetConflict(ValueError):
 
 
 class RawTransfers:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, namespace: str = "raw", max_size: int = 32 * 1024 ** 3):
         self.root = root
-        self.objects = ObjectStore(root)
-        self.staging = root / "transfers"
+        self.objects = ObjectStore(root, namespace=namespace)
+        self.staging = root / ("transfers" if namespace == "raw" else "revision-transfers")
+        self.max_size = max_size
 
     def paths(self, producer: str, key: str):
         self.objects.path(key)  # Reject path traversal before forming any path.
@@ -41,7 +42,7 @@ class RawTransfers:
                     "offset": partial.stat().st_size if partial.exists() else 0}
 
     def append(self, producer: str, key: str, offset: int, total: int, chunk: bytes) -> dict:
-        if not 0 <= offset <= total <= 32 * 1024 ** 3 or len(chunk) > MAX_CHUNK:
+        if not 0 <= offset <= total <= self.max_size or len(chunk) > MAX_CHUNK:
             raise ValueError("invalid transfer size or offset")
         if offset + len(chunk) > total or (not chunk and offset != total):
             raise ValueError("chunk exceeds declared file size")

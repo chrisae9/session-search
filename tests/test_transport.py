@@ -59,6 +59,26 @@ def test_standby_never_accepts_upload(setup):
     _, root, credentials = setup
     standby = TestClient(create_app(root, credentials, readonly=True))
     assert standby.post("/v1/revisions", headers=HEADERS, json=payload()).status_code == 409
+    key = "a" * 64
+    assert standby.get(f"/v1/revision-objects/{key}", headers=HEADERS).status_code == 409
+    assert standby.put(f"/v1/revision-objects/{key}?offset=0&total=1",
+                       headers=HEADERS, content=b"x").status_code == 409
+    assert standby.post("/v1/revision-objects", headers=HEADERS,
+                        json={"digest": key, "size": 1}).status_code == 409
+
+
+def test_large_revision_limit_and_busy_admission_return_retryable_status(setup):
+    import fcntl
+
+    from session_search.core.protocol import MAX_REVISION_UPLOAD
+
+    client, root, _ = setup
+    assert client.post("/v1/revision-objects", headers=HEADERS,
+        json={"digest": "a" * 64, "size": MAX_REVISION_UPLOAD + 1}).status_code == 413
+    with (root / ".revision-ingest.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        assert client.post("/v1/revision-objects", headers=HEADERS,
+            json={"digest": "a" * 64, "size": 1}).status_code == 503
 
 
 def test_legacy_locator_expands_through_authenticated_context(setup):

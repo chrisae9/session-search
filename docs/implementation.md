@@ -15,6 +15,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.
+- [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
 - [x] Verified legacy archive importer and immutable historical turn/event locator aliases.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Cross-host replica transport, credential revocation propagation, and recovery automation.

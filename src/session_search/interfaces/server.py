@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import hmac
 import json
@@ -11,11 +12,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from session_search.core.output import bounded_response
+from session_search.core.protocol import MAX_REQUEST, MAX_REVISION_UPLOAD
 from session_search.core.records import Event, SearchQuery, SessionRevision
 from session_search.storage.catalog import Catalog
-
-MAX_REQUEST = 8 * 1024 * 1024
-
 
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                provider=None) -> FastAPI:
@@ -123,5 +122,56 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
             raise HTTPException(503, "transfer progress changed; retry from durable offset") from None
         except OSError:
             raise HTTPException(503, "storage unavailable; retain upload for retry") from None
+
+    def revision_transfers():
+        from session_search.storage.transfers import RawTransfers
+        return RawTransfers(data_dir, namespace="revision-upload", max_size=MAX_REVISION_UPLOAD)
+
+    @app.get("/v1/revision-objects/{key}")
+    def revision_status(key: str, request: Request):
+        if readonly:
+            raise HTTPException(409, "revision transfer is available only on the primary")
+        return revision_transfers().status(request.state.producer, key)
+
+    @app.put("/v1/revision-objects/{key}")
+    async def revision_chunk(key: str, offset: int, total: int, request: Request):
+        if readonly:
+            raise HTTPException(409, "standby does not accept revision uploads")
+        if total > MAX_REVISION_UPLOAD:
+            raise HTTPException(413, "normalized revision exceeds transfer limit")
+        from starlette.concurrency import run_in_threadpool
+        from session_search.storage.transfers import OffsetConflict
+        try:
+            return await run_in_threadpool(revision_transfers().append,
+                request.state.producer, key, offset, total, await request.body())
+        except (OffsetConflict, OSError):
+            raise HTTPException(503, "retain revision upload and retry from durable progress") from None
+
+    @app.post("/v1/revision-objects")
+    def ingest_revision_object(data: dict, request: Request):
+        if readonly:
+            raise HTTPException(409, "standby does not accept writes")
+        if set(data) != {"digest", "size"} or type(data["size"]) is not int:
+            raise HTTPException(400, "invalid revision object reference")
+        if not 0 < data["size"] <= MAX_REVISION_UPLOAD:
+            raise HTTPException(413, "normalized revision exceeds transfer limit")
+        try:
+            # Bound large JSON materialization across server worker processes.
+            with (data_dir / ".revision-ingest.lock").open("a") as guard:
+                fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                objects = revision_transfers().objects
+                path = objects.path(data["digest"])
+                if path.stat().st_size != data["size"] or not objects.verify(data["digest"]):
+                    raise HTTPException(400, "revision object checksum or size mismatch")
+                value = json.loads(path.read_bytes())
+                if not isinstance(value, dict):
+                    raise HTTPException(400, "revision envelope must be an object")
+                result = ingest(value, request)
+                # This object is transfer staging, never raw archival evidence.
+                # A lost response safely repeats the transfer and idempotent ingest.
+                path.unlink(missing_ok=True)
+                return result
+        except OSError:
+            raise HTTPException(503, "revision staging unavailable; retain payload and retry") from None
 
     return app

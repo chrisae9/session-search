@@ -77,12 +77,20 @@ def fts_expression(text: str) -> str:
     return " OR ".join('"' + value.replace('"', '""') + '"' for value in values)
 
 
+def match_offset(text: str, query: str) -> int:
+    match = re.search(re.escape(query.strip('"')), text, re.IGNORECASE)
+    if match:
+        return match.start()
+    positions = []
+    for phrase, word in re.findall(r'"([^"]+)"|(\S+)', query):
+        match = re.search(re.escape(phrase or word), text, re.IGNORECASE)
+        if match:
+            positions.append(match.start())
+    return min(positions, default=0)
+
+
 def excerpt(text: str, query: str, limit: int = 800) -> str:
-    needle = query.strip('"').casefold()
-    position = text.casefold().find(needle)
-    if position < 0:
-        positions = [text.casefold().find(term.strip('"').casefold()) for term in query.split()]
-        position = min((p for p in positions if p >= 0), default=0)
+    position = match_offset(text, query)
     start = max(0, position - limit // 4)
     return ("…" if start else "") + text[start:start + limit] + (
         "…" if len(text) > start + limit else ""
@@ -285,7 +293,8 @@ class Catalog:
         results = []
         for row in rows[:query.limit]:
             results.append({
-                "citation": Citation(row["session_id"], row["revision"], row["event_id"]).to_dict(),
+                "citation": Citation(row["session_id"], row["revision"], row["event_id"],
+                                     match_offset(row["text"], query.text)).to_dict(),
                 "role": row["role"], "timestamp": row["timestamp"], "origin": row["origin"],
                 "excerpt": excerpt(row["text"], query.text), "project": row["project"],
                 "title": row["title"], "score": -row["rank"],
