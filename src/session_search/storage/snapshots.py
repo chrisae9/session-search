@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from session_search.core.records import canonical_json, digest
+from session_search.core.records import Event, SessionRevision, canonical_json, digest
 from session_search.storage.catalog import Catalog
 from session_search.storage.objects import ObjectStore, sync_directory
 
@@ -92,6 +92,11 @@ def verify_snapshot(path: Path) -> dict:
             raise ValueError("snapshot database integrity check failed")
         if catalog.db.execute("PRAGMA foreign_key_check").fetchone():
             raise ValueError("snapshot database reference check failed")
+        for row in catalog.db.execute("SELECT session_id,revision FROM revisions"):
+            value = catalog.export_revision(row["session_id"], row["revision"])
+            value["events"] = tuple(Event(**event) for event in value["events"])
+            if SessionRevision(**value).revision != row["revision"]:
+                raise ValueError("snapshot canonical revision digest mismatch")
         expected = [{"digest": row[0], "size": row[1]} for row in catalog.db.execute(
             "SELECT DISTINCT digest,size FROM raw_sources ORDER BY digest")]
         if expected != manifest["raw_objects"]:

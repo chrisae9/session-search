@@ -6,19 +6,21 @@ source disappearance has no corresponding write operation.
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 import sqlite3
+from dataclasses import asdict
 from pathlib import Path
 
-from session_search.core.records import Citation, SearchQuery, SessionRevision, canonical_json
+from session_search.core.records import Citation, SearchQuery, SessionRevision, canonical_json, digest
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS revisions (
  session_id TEXT NOT NULL, revision TEXT NOT NULL, source TEXT NOT NULL,
  project TEXT NOT NULL, title TEXT NOT NULL, parent_session_id TEXT,
  is_subagent INTEGER NOT NULL, parser_version TEXT NOT NULL,
- event_count INTEGER NOT NULL,
+ event_count INTEGER NOT NULL, event_map BLOB NOT NULL,
  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
  PRIMARY KEY(session_id, revision)
 );
@@ -26,14 +28,19 @@ CREATE TABLE IF NOT EXISTS heads (
  session_id TEXT PRIMARY KEY, revision TEXT NOT NULL,
  FOREIGN KEY(session_id,revision) REFERENCES revisions(session_id,revision)
 );
-CREATE TABLE IF NOT EXISTS events (
- row_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, revision TEXT NOT NULL,
- event_id TEXT NOT NULL, ordinal INTEGER NOT NULL, role TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS evidence (
+ row_id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, content_hash TEXT NOT NULL UNIQUE,
+ event_id TEXT NOT NULL, role TEXT NOT NULL,
  text TEXT NOT NULL, timestamp TEXT NOT NULL, origin TEXT NOT NULL, kind TEXT NOT NULL,
- UNIQUE(session_id,revision,event_id),
- FOREIGN KEY(session_id,revision) REFERENCES revisions(session_id,revision)
+ UNIQUE(session_id,event_id,content_hash)
 );
-CREATE INDEX IF NOT EXISTS events_revision ON events(session_id,revision,ordinal);
+CREATE INDEX IF NOT EXISTS evidence_identity ON evidence(session_id,event_id);
+CREATE TABLE IF NOT EXISTS active_events (
+ session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, event_row INTEGER NOT NULL REFERENCES evidence(row_id),
+ PRIMARY KEY(session_id,ordinal)
+);
+CREATE VIEW IF NOT EXISTS events AS SELECT b.*,h.revision,a.ordinal FROM evidence b
+ JOIN active_events a ON a.event_row=b.row_id JOIN heads h ON h.session_id=a.session_id;
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(text, tokenize='unicode61');
 CREATE TABLE IF NOT EXISTS producers (
  session_id TEXT NOT NULL, revision TEXT NOT NULL, producer TEXT NOT NULL,
@@ -54,7 +61,7 @@ CREATE TABLE IF NOT EXISTS raw_sources (
  PRIMARY KEY(session_id,revision,digest,path),
  FOREIGN KEY(session_id,revision) REFERENCES revisions(session_id,revision)
 );
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 """
 
 
@@ -98,7 +105,7 @@ class Catalog:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in {0, 1}:
+        if version not in {0, 2}:
             self.close()
             raise ValueError("unsupported catalog schema; upgrade Session Search")
         if not readonly:
@@ -106,7 +113,7 @@ class Catalog:
             self.db.execute("PRAGMA synchronous=FULL")
             self.db.executescript(SCHEMA)
             path.chmod(0o600)
-        elif version != 1:
+        elif version != 2:
             self.close()
             raise ValueError("uninitialized catalog")
 
@@ -145,27 +152,38 @@ class Catalog:
                 (session.session_id, revision),
             ).fetchone()
             if not exists:
-                self.db.execute(
-                    "INSERT INTO revisions(session_id,revision,source,project,title,"
-                    "parent_session_id,is_subagent,parser_version,event_count) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (session.session_id, revision, session.source, session.project, session.title,
-                     session.parent_session_id, session.is_subagent, session.parser_version,
-                     len(session.events)),
-                )
-                self.db.execute(
-                    "DELETE FROM evidence_fts WHERE rowid IN (SELECT e.row_id FROM events e "
-                    "JOIN heads h ON h.session_id=e.session_id AND h.revision=e.revision "
-                    "WHERE e.session_id=?)", (session.session_id,),
-                )
+                previous_rows = {row[0] for row in self.db.execute(
+                    "SELECT event_row FROM active_events WHERE session_id=?", (session.session_id,)
+                )}
+                self.db.execute("DELETE FROM active_events WHERE session_id=?", (session.session_id,))
+                event_ids = []
                 for index, event in enumerate(session.events):
-                    row = self.db.execute(
-                        "INSERT INTO events(session_id,revision,event_id,ordinal,role,text,"
-                        "timestamp,origin,kind) VALUES (?,?,?,?,?,?,?,?,?)",
-                        (session.session_id, revision, event.event_id, index, event.role,
+                    content_hash = digest(canonical_json({"session_id": session.session_id,
+                                                          **asdict(event)}).encode())
+                    self.db.execute(
+                        "INSERT OR IGNORE INTO evidence(session_id,content_hash,event_id,role,text,"
+                        "timestamp,origin,kind) VALUES (?,?,?,?,?,?,?,?)",
+                        (session.session_id, content_hash, event.event_id, event.role,
                          event.text, event.timestamp, event.origin, event.kind),
                     )
-                    self.db.execute("INSERT INTO evidence_fts(rowid,text) VALUES (?,?)",
-                                    (row.lastrowid, event.text))
+                    row_id = self.db.execute("SELECT row_id FROM evidence WHERE content_hash=?",
+                                              (content_hash,)).fetchone()[0]
+                    event_ids.append(row_id)
+                    if row_id not in previous_rows:
+                        self.db.execute("INSERT INTO evidence_fts(rowid,text) VALUES (?,?)",
+                                        (row_id, event.text))
+                    self.db.execute("INSERT INTO active_events VALUES (?,?,?)",
+                                    (session.session_id, index, row_id))
+                self.db.executemany("DELETE FROM evidence_fts WHERE rowid=?",
+                                    ((row_id,) for row_id in previous_rows - set(event_ids)))
+                self.db.execute(
+                    "INSERT INTO revisions(session_id,revision,source,project,title,"
+                    "parent_session_id,is_subagent,parser_version,event_count,event_map) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (session.session_id, revision, session.source, session.project, session.title,
+                     session.parent_session_id, session.is_subagent, session.parser_version,
+                     len(session.events), gzip.compress(canonical_json(event_ids).encode(), mtime=0)),
+                )
                 self.db.execute(
                     "INSERT INTO heads VALUES (?,?) ON CONFLICT(session_id) "
                     "DO UPDATE SET revision=excluded.revision", (session.session_id, revision),
@@ -265,19 +283,16 @@ class Catalog:
             raise ValueError("context accepts at most 100 citations and 0–10 neighbors")
         results = []
         for cite in citations:
-            hit = self.db.execute(
-                "SELECT ordinal FROM events WHERE session_id=? AND revision=? AND event_id=?",
-                (cite.session_id, cite.revision, cite.event_id),
-            ).fetchone()
-            if not hit:
+            event_ids = self.revision_event_ids(cite.session_id, cite.revision)
+            candidates = {row[0] for row in self.db.execute(
+                "SELECT row_id FROM evidence WHERE session_id=? AND event_id=?",
+                (cite.session_id, cite.event_id),
+            )}
+            position = next((i for i, row_id in enumerate(event_ids) if row_id in candidates), None)
+            if position is None:
                 results.append({"citation": cite.to_dict(), "status": "unavailable"})
                 continue
-            rows = self.db.execute(
-                "SELECT event_id,role,text,timestamp,origin,kind FROM events "
-                "WHERE session_id=? AND revision=? AND ordinal BETWEEN ? AND ? ORDER BY ordinal",
-                (cite.session_id, cite.revision, hit[0] - neighbors, hit[0] + neighbors),
-            ).fetchall()
-            events = [dict(row) for row in rows]
+            events = self.read_events(event_ids[max(0, position - neighbors):position + neighbors + 1])
             for event in events:
                 if event["event_id"] == cite.event_id:
                     if cite.offset > len(event["text"]):
@@ -290,6 +305,26 @@ class Catalog:
             results.append({"citation": cite.to_dict(), "status": "ok", "events": events})
         missing = sum(result["status"] != "ok" for result in results)
         return {"version": 1, "status": "partial" if missing else "ok", "results": results}
+
+    def revision_event_ids(self, session_id: str, revision: str) -> list[int]:
+        row = self.db.execute("SELECT event_map FROM revisions WHERE session_id=? AND revision=?",
+                               (session_id, revision)).fetchone()
+        return json.loads(gzip.decompress(row[0])) if row else []
+
+    def read_events(self, event_ids: list[int]) -> list[dict]:
+        events = {}
+        for start in range(0, len(event_ids), 500):
+            batch = event_ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            rows = self.db.execute("SELECT row_id,event_id,role,text,timestamp,origin,kind "
+                                   f"FROM evidence WHERE row_id IN ({placeholders})", batch)
+            for row in rows:
+                value = dict(row)
+                key = value.pop("row_id")
+                events[key] = value
+        if len(events) != len(event_ids):
+            raise ValueError("revision references missing or duplicate evidence")
+        return [events[row_id] for row_id in event_ids]
 
     def status(self) -> dict:
         row = self.db.execute(
@@ -316,7 +351,5 @@ class Catalog:
             "session_id", "source", "project", "title", "parent_session_id", "parser_version"
         )}
         result["is_subagent"] = bool(row["is_subagent"])
-        result["events"] = [dict(event) for event in self.db.execute(
-            "SELECT event_id,role,text,timestamp,origin,kind FROM events "
-            "WHERE session_id=? AND revision=? ORDER BY ordinal", (session_id, revision))]
+        result["events"] = self.read_events(self.revision_event_ids(session_id, revision))
         return json.loads(canonical_json(result))

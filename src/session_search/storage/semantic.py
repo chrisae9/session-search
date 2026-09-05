@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS semantic_chunks (
  content_hash TEXT PRIMARY KEY, text TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS event_chunks (
- event_row INTEGER NOT NULL REFERENCES events(row_id), content_hash TEXT NOT NULL,
+ event_row INTEGER NOT NULL REFERENCES evidence(row_id), content_hash TEXT NOT NULL,
  chunk_start INTEGER NOT NULL, PRIMARY KEY(event_row,chunk_start)
 );
 CREATE TABLE IF NOT EXISTS vectors (

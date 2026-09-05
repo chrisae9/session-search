@@ -5,6 +5,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Standalone Python package and optional dependency groups.
 - [x] Codex parser extraction with existing regression fixtures.
 - [x] Transactional canonical revisions and lexical retrieval.
+- [x] Shared immutable evidence records and compressed revision maps; unchanged text is not copied for each growing revision.
 - [x] Immutable bounded context and CLI.
 - [x] Durable upload queue and complete-record capture checkpoints.
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
@@ -23,3 +24,5 @@ Existing production storage remains separate. Offload tests use synthetic files 
 The present semantic provider limit applies per worker, not across hosts or processes. This is not yet the deployment-wide admission control required for release. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 
 Parser regression fixtures cover the extracted Codex behavior. Historical turn-number compatibility and whole-corpus retrieval parity still need migration/evaluation tests. Do not infer those guarantees from the current unit tests.
+
+The development catalog is schema version 2. The earlier prototype schema is deliberately rejected rather than silently modified; no production Session Search catalog has been migrated. Snapshot verification checks canonical revision digests in addition to database and raw-object integrity.

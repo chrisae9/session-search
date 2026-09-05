@@ -27,7 +27,7 @@ def test_revision_retry_never_rewinds_head_or_changes_old_citation(tmp_path):
 
 def test_transaction_failure_rolls_back_entire_revision(tmp_path):
     with Catalog(tmp_path) as catalog:
-        catalog.db.execute("CREATE TRIGGER reject_event BEFORE INSERT ON events BEGIN "
+        catalog.db.execute("CREATE TRIGGER reject_event BEFORE INSERT ON evidence BEGIN "
                            "SELECT RAISE(ABORT, 'injected crash'); END")
         with pytest.raises(sqlite3.IntegrityError):
             catalog.ingest(session(), producer="a", request_id="1")
@@ -90,3 +90,16 @@ def test_readonly_catalog_rejects_writes_and_absent_revision_is_explicit(tmp_pat
         response = catalog.context([Citation("session-1", "missing", "e1")])
         assert response["status"] == "partial"
         assert response["results"][0]["status"] == "unavailable"
+
+
+def test_growing_sessions_share_unchanged_evidence_between_revisions(tmp_path):
+    events = []
+    with Catalog(tmp_path) as catalog:
+        for index in range(50):
+            events.append(Event(str(index), "user", f"evidence {index} " + "context " * 100))
+            current = SessionRevision("growing", tuple(events))
+            catalog.ingest(current, producer="d", request_id=str(index))
+        assert catalog.db.execute("SELECT COUNT(*) FROM revisions").fetchone()[0] == 50
+        assert catalog.db.execute("SELECT COUNT(*) FROM evidence").fetchone()[0] == 50
+        assert catalog.db.execute("SELECT COUNT(*) FROM evidence_fts").fetchone()[0] == 50
+        assert catalog.db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 50
