@@ -1,0 +1,10 @@
+[Unit]
+Description=Publish a verified Session Search replica
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/session-search-v1/replication.env
+ExecStart=%h/.local/bin/session-search --data-dir ${SESSION_SEARCH_DATA} replicate --outbox ${SESSION_SEARCH_OUTBOX} --host ${SESSION_SEARCH_STANDBY_HOST} --remote-data ${SESSION_SEARCH_STANDBY_DATA} --remote-executable ${SESSION_SEARCH_STANDBY_EXECUTABLE}
+UMask=0077
+Nice=10
+TimeoutStartSec=15min

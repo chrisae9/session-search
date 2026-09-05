@@ -49,6 +49,7 @@ def prepare_chunks(catalog: Catalog):
                     catalog.db.execute("INSERT OR IGNORE INTO semantic_chunks VALUES (?,?)", (key, text))
                     catalog.db.execute("INSERT OR IGNORE INTO event_chunks VALUES (?,?,?)",
                                        (row[0], key, start))
+            catalog.bump_publication()
 
 
 def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
@@ -74,6 +75,7 @@ def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
                                    (identity, row["content_hash"], data))
                 catalog.db.execute("DELETE FROM embedding_failures WHERE identity=? AND content_hash=?",
                                    (identity, row["content_hash"]))
+                catalog.bump_publication()
             completed += 1
         except (OSError, ValueError, KeyError, TypeError) as exc:
             with catalog.db:
@@ -83,6 +85,7 @@ def index_pending(catalog: Catalog, provider, *, limit: int = 100) -> dict:
                     "next_attempt=excluded.next_attempt,error=excluded.error",
                     (identity, row["content_hash"], time.time() + 60, type(exc).__name__),
                 )
+                catalog.bump_publication()
             failed += 1
     return {"version": 1, "status": "partial" if failed else "ok",
             "embedded": completed, "failed": failed, "identity": identity}

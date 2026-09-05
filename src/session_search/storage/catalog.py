@@ -16,6 +16,10 @@ from pathlib import Path
 from session_search.core.records import Citation, SearchQuery, SessionRevision, canonical_json, digest
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS publication_state (
+ id INTEGER PRIMARY KEY CHECK(id=1), identity TEXT NOT NULL, epoch INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO publication_state VALUES (1,lower(hex(randomblob(16))),0);
 CREATE TABLE IF NOT EXISTS revisions (
  session_id TEXT NOT NULL, revision TEXT NOT NULL, source TEXT NOT NULL,
  project TEXT NOT NULL, title TEXT NOT NULL, parent_session_id TEXT,
@@ -227,7 +231,17 @@ class Catalog:
                 self.db.execute("INSERT OR IGNORE INTO raw_sources VALUES (?,?,?,?,?,?)",
                                 (session.session_id, revision, raw["digest"], raw["size"],
                                  raw["path"], raw["fingerprint"]))
+            self.bump_publication()
         return {"session_id": session.session_id, "revision": revision, "duplicate": bool(exists)}
+
+    def bump_publication(self):
+        self.db.execute("UPDATE publication_state SET epoch=epoch+1 WHERE id=1")
+
+    def publication(self) -> str | None:
+        if not self.db.execute("SELECT 1 FROM sqlite_master WHERE name='publication_state'").fetchone():
+            return None
+        row = self.db.execute("SELECT identity,epoch FROM publication_state WHERE id=1").fetchone()
+        return f"{row[0]}:{row[1]}" if row else None
 
     def fingerprint(self, path: str) -> str | None:
         row = self.db.execute("SELECT fingerprint FROM checkpoints WHERE path=?", (path,)).fetchone()
@@ -377,6 +391,7 @@ class Catalog:
             "JOIN revisions r ON h.session_id=r.session_id AND h.revision=r.revision"
         ).fetchone()
         result = {"sessions": row["sessions"], "events": row["events"],
+                  "publication": self.publication(),
                   "semantic_indexed": None,
                   "replication": "not_configured", "backup": "not_configured"}
         manifest = self.root / "manifest.json"

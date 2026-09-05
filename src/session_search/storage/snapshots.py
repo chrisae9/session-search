@@ -36,6 +36,10 @@ def create_snapshot(catalog: Catalog, destination: Path, *, search_only: bool = 
             target.execute("PRAGMA journal_mode=DELETE")
             target.commit()
             objects = target.execute("SELECT DISTINCT digest,size FROM raw_sources ORDER BY digest").fetchall()
+            publication = None
+            if target.execute("SELECT 1 FROM sqlite_master WHERE name='publication_state'").fetchone():
+                row = target.execute("SELECT identity,epoch FROM publication_state WHERE id=1").fetchone()
+                publication = f"{row[0]}:{row[1]}" if row else None
         finally:
             target.close()
         (stage / "catalog.sqlite3").chmod(0o600)
@@ -63,6 +67,7 @@ def create_snapshot(catalog: Catalog, destination: Path, *, search_only: bool = 
                 raise ValueError("raw object size mismatch")
         manifest = {"version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
                     "purpose": "search-replica" if search_only else "recovery",
+                    "publication": publication,
                     "catalog_sha256": file_digest(stage / "catalog.sqlite3"),
                     "raw_objects": [{"digest": key, "size": size} for key, size in objects]}
         content = canonical_json(manifest)
@@ -115,8 +120,11 @@ def verify_snapshot(path: Path) -> dict:
             if not objects.verify(item["digest"]) or objects.path(item["digest"]).stat().st_size != item["size"]:
                 raise ValueError("snapshot raw evidence is missing or corrupt")
         coverage = catalog.status()
+        if manifest.get("publication") != catalog.publication():
+            raise ValueError("snapshot publication does not match its catalog")
     return {"version": 1, "status": "verified", "coverage": coverage,
             "purpose": purpose,
+            "publication": manifest.get("publication"),
             "snapshot": digest(canonical_json(manifest).encode()),
             "created_at": manifest["created_at"]}
 
@@ -129,7 +137,7 @@ def activate_replica(snapshot: Path, replica: Path) -> dict:
         raise ValueError("refusing to activate a replica over a writable catalog")
     generations = replica / "generations"
     generations.mkdir(parents=True, exist_ok=True, mode=0o700)
-    from session_search.storage.generations import publication_lock, publish_locked, prune_replica
+    from session_search.storage.generations import pointer, publication_lock, publish_locked, prune_replica
     generation = generations / verified["snapshot"]
     stage = Path(tempfile.mkdtemp(prefix=".transfer-", dir=generations))
     try:
@@ -148,6 +156,18 @@ def activate_replica(snapshot: Path, replica: Path) -> dict:
                 sync_directory(path)
         sync_directory(stage)
         with publication_lock(replica, exclusive=True):
+            current = pointer(replica, "CURRENT")
+            if current:
+                previous_manifest = json.loads((generations / current / "manifest.json").read_text())
+                previous_publication = previous_manifest.get("publication")
+                incoming_publication = verified.get("publication")
+                if previous_publication:
+                    if not incoming_publication:
+                        raise ValueError("replica publication identity is missing")
+                    old_identity, old_epoch = previous_publication.split(":")
+                    new_identity, new_epoch = incoming_publication.split(":")
+                    if new_identity != old_identity or int(new_epoch) < int(old_epoch):
+                        raise ValueError("replica publication would change primary identity or move backward")
             if generation.exists():
                 verify_snapshot(generation)
                 if not (generation / ".readers.lock").is_file():

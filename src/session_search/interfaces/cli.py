@@ -41,6 +41,13 @@ def parser() -> argparse.ArgumentParser:
     verify.add_argument("snapshot", type=Path)
     replica = commands.add_parser("activate-replica", help="stage, verify, and activate a read-only replica")
     replica.add_argument("snapshot", type=Path)
+    receive = commands.add_parser("receive-replica", help="verify and consume a staged search replica")
+    receive.add_argument("snapshot", type=Path)
+    replicate = commands.add_parser("replicate", help="publish a search replica over SSH, resuming interrupted work")
+    replicate.add_argument("--outbox", type=Path, required=True)
+    replicate.add_argument("--host", required=True)
+    replicate.add_argument("--remote-data", required=True)
+    replicate.add_argument("--remote-executable", required=True)
     commands.add_parser("prune-replica", help="retain current, previous, and actively read replica generations")
     backup = commands.add_parser("backup", help="back up and restore-verify a snapshot on two repositories")
     backup.add_argument("snapshot", type=Path)
@@ -127,6 +134,15 @@ def main(argv=None) -> int:
                     output = apply_offload(json.loads(args.plan.read_text()),
                         load_repositories(args.repositories), catalog=catalog,
                         expected_plan_id=args.plan_id)
+            print(canonical_json(output))
+            return 0
+        if args.command in {"replicate", "receive-replica"}:
+            from session_search.storage.replication import receive_replica, replicate
+            if client:
+                raise ValueError("replication administration runs on the data host")
+            output = (receive_replica(args.snapshot, args.data_dir) if args.command == "receive-replica"
+                      else replicate(args.data_dir, args.outbox, args.host,
+                                     args.remote_data, args.remote_executable))
             print(canonical_json(output))
             return 0
         if args.command in {"snapshot", "verify-snapshot", "activate-replica", "prune-replica"}:
