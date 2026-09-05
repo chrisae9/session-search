@@ -14,6 +14,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.
+- [x] Verified legacy archive importer and immutable historical turn/event locator aliases.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Cross-host replica transport, credential revocation propagation, and recovery automation.
 - [ ] Offline installation, quality/performance evaluations, and migration.
@@ -23,6 +24,6 @@ Existing production storage remains separate. Offload tests use synthetic files 
 
 The present semantic provider limit applies per worker, not across hosts or processes. This is not yet the deployment-wide admission control required for release. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 
-Parser regression fixtures cover the extracted Codex behavior. Historical turn-number compatibility and whole-corpus retrieval parity still need migration/evaluation tests. Do not infer those guarantees from the current unit tests.
+Parser regression fixtures cover the extracted Codex behavior. [Legacy migration](migration.md) tests cover historical locator preservation after subsequent capture, tombstones, and conflicting or corrupt archives. Whole-corpus retrieval parity and client checkpoint reconciliation still need migration/evaluation tests. Do not infer those guarantees from the current unit tests.
 
 The development catalog is schema version 2. The earlier prototype schema is deliberately rejected rather than silently modified; no production Session Search catalog has been migrated. Snapshot verification checks canonical revision digests in addition to database and raw-object integrity.

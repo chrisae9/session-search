@@ -61,6 +61,21 @@ def test_standby_never_accepts_upload(setup):
     assert standby.post("/v1/revisions", headers=HEADERS, json=payload()).status_code == 409
 
 
+def test_legacy_locator_expands_through_authenticated_context(setup):
+    client, root, _ = setup
+    revision = client.post("/v1/revisions", headers=HEADERS, json=payload()).json()["revision"]
+    with Catalog(root) as catalog:
+        with catalog.db:
+            catalog.db.execute("INSERT INTO legacy_citations VALUES (?,?,?,?)",
+                               ("codex:s1:turn:7", "s1", revision, "e1"))
+    response = client.post("/v1/context", headers=HEADERS,
+                           json={"citations": [{"legacy_locator": "codex:s1:turn:7"}]})
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["citation"]["revision"] == revision
+    assert result["events"][0]["text"] == "backup fix"
+
+
 def test_client_failover_is_read_only_and_auth_errors_do_not_retry(tmp_path, monkeypatch):
     client = Client("https://primary.example", tmp_path / "token", standby="https://standby.example")
     called = []

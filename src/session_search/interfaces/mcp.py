@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from session_search.core.output import bounded_response
-from session_search.core.records import Citation, SearchQuery, canonical_json
+from session_search.core.records import SearchQuery, canonical_json
 from session_search.interfaces.client import Client
 from session_search.storage.catalog import Catalog
 
@@ -26,7 +26,7 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
                 from session_search.storage.semantic import hybrid_search
                 return hybrid_search(catalog, SearchQuery(**payload), provider)
             if operation == "context":
-                return catalog.context([Citation(**value) for value in payload["citations"]],
+                return catalog.context(payload["citations"],
                                        neighbors=payload["neighbors"])
             return {"version": 1, "status": "ok", "coverage": catalog.status()}
 

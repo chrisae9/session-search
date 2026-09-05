@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS raw_sources (
  PRIMARY KEY(session_id,revision,digest,path),
  FOREIGN KEY(session_id,revision) REFERENCES revisions(session_id,revision)
 );
+CREATE TABLE IF NOT EXISTS legacy_citations (
+ locator TEXT NOT NULL,session_id TEXT NOT NULL,revision TEXT NOT NULL,event_id TEXT NOT NULL,
+ PRIMARY KEY(locator,session_id,revision,event_id),
+ FOREIGN KEY(session_id,revision) REFERENCES revisions(session_id,revision)
+);
 PRAGMA user_version = 2;
 """
 
@@ -278,11 +283,24 @@ class Catalog:
                 "mode": "keyword", "semantic_available": False, "results": results,
                 "more_matches": len(rows) > query.limit, "coverage": self.status()}
 
-    def context(self, citations: list[Citation], *, neighbors: int = 2) -> dict:
+    def context(self, citations: list[Citation | dict], *, neighbors: int = 2) -> dict:
         if len(citations) > 100 or not 0 <= neighbors <= 10:
             raise ValueError("context accepts at most 100 citations and 0–10 neighbors")
         results = []
-        for cite in citations:
+        resolved = []
+        for value in citations:
+            if isinstance(value, Citation):
+                resolved.append(value)
+            elif set(value) == {"legacy_locator"}:
+                matches = self.legacy_citations(value["legacy_locator"])
+                if not matches:
+                    results.append({"legacy_locator": value["legacy_locator"], "status": "unavailable"})
+                resolved.extend(matches)
+            else:
+                resolved.append(Citation(**value))
+        if len(resolved) > 100:
+            raise ValueError("expanded legacy context exceeds 100 events; narrow the request")
+        for cite in resolved:
             event_ids = self.revision_event_ids(cite.session_id, cite.revision)
             candidates = {row[0] for row in self.db.execute(
                 "SELECT row_id FROM evidence WHERE session_id=? AND event_id=?",
@@ -305,6 +323,13 @@ class Catalog:
             results.append({"citation": cite.to_dict(), "status": "ok", "events": events})
         missing = sum(result["status"] != "ok" for result in results)
         return {"version": 1, "status": "partial" if missing else "ok", "results": results}
+
+    def legacy_citations(self, locator: str) -> list[Citation]:
+        rows = self.db.execute("SELECT session_id,revision,event_id FROM legacy_citations "
+                               "WHERE locator=? ORDER BY event_id LIMIT 101", (locator,)).fetchall()
+        if len(rows) > 100 or len({row["session_id"] for row in rows}) > 1:
+            raise ValueError("legacy locator is ambiguous or too broad; use a specific event citation")
+        return [Citation(**dict(row)) for row in rows]
 
     def revision_event_ids(self, session_id: str, revision: str) -> list[int]:
         row = self.db.execute("SELECT event_map FROM revisions WHERE session_id=? AND revision=?",

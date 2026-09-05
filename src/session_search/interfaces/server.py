@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from session_search.core.output import bounded_response
-from session_search.core.records import Citation, Event, SearchQuery, SessionRevision
+from session_search.core.records import Event, SearchQuery, SessionRevision
 from session_search.storage.catalog import Catalog
 
 MAX_REQUEST = 8 * 1024 * 1024
@@ -71,7 +71,7 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
             raise HTTPException(400, "unknown context field")
         with read() as catalog:
             return bounded_response(catalog.context(
-                [Citation(**value) for value in data["citations"]],
+                data["citations"],
                 neighbors=data.get("neighbors", 2)), data.get("budget", 32768))
 
     @app.post("/v1/revisions")

@@ -10,7 +10,7 @@ from pathlib import Path
 from session_search.capture.local import capture_home
 from session_search.capture.queue import UploadQueue
 from session_search.core.output import bounded_response
-from session_search.core.records import Citation, SearchQuery, canonical_json
+from session_search.core.records import SearchQuery, canonical_json
 from session_search.interfaces.client import Client, RemoteError
 from session_search.storage.catalog import Catalog
 
@@ -28,6 +28,8 @@ def parser() -> argparse.ArgumentParser:
                         help="explicitly permit the configured remote model endpoint")
     commands = result.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="create an isolated catalog")
+    legacy = commands.add_parser("import-legacy", help="import a verified legacy archive into a new store")
+    legacy.add_argument("archive", type=Path)
     commands.add_parser("status", help="inspect catalog coverage")
     snapshot = commands.add_parser("snapshot", help="create a consistent verified backup input")
     snapshot.add_argument("destination", type=Path)
@@ -87,6 +89,12 @@ def parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "import-legacy":
+            if args.primary or args.standby or args.token_file:
+                raise ValueError("legacy import runs locally on the destination data host")
+            from session_search.capture.legacy import import_archive
+            print(canonical_json(import_archive(args.archive, args.data_dir)))
+            return 0
         if (args.standby or args.token_file) and not args.primary:
             raise ValueError("remote settings require an explicit primary endpoint")
         if args.primary and not args.token_file:
@@ -193,7 +201,7 @@ def main(argv=None) -> int:
                 if not isinstance(values, list):
                     raise ValueError("citations must be a JSON array")
                 output = bounded_response(catalog.context(
-                    [Citation(**value) for value in values], neighbors=args.neighbors,
+                    values, neighbors=args.neighbors,
                 ), args.budget)
         print(canonical_json(output))
         return 0
