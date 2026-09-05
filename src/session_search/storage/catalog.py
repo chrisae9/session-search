@@ -393,7 +393,27 @@ class Catalog:
         result = {"sessions": row["sessions"], "events": row["events"],
                   "publication": self.publication(),
                   "semantic_indexed": None,
-                  "replication": "not_configured", "backup": "not_configured"}
+                  "replication": {"status": "not_configured"}, "backup": "not_configured"}
+        receipts = self.root / "replication-receipts"
+        if receipts.exists():
+            acknowledgements = []
+            paths = sorted(receipts.glob("*.json"))
+            errors = 0
+            for path in paths[:16]:
+                try:
+                    value = json.loads(path.read_text())
+                    acknowledgements.append({"host": value["destination"]["host"],
+                        "publication": value["publication"], "verified_at": value.get("verified_at"),
+                        "matches_current": value["publication"] == result["publication"]})
+                except (OSError, ValueError, KeyError, TypeError):
+                    errors += 1
+            if acknowledgements:
+                result["replication"] = {"status": "acknowledged" if all(
+                    item["matches_current"] for item in acknowledgements) else "behind",
+                    "acknowledgements": acknowledgements}
+            if errors or len(paths) > 16:
+                result["replication"].update(status="partial", unreadable_receipts=errors,
+                                             more_destinations=len(paths) > 16)
         manifest = self.root / "manifest.json"
         if manifest.exists():
             from session_search.core.records import digest
@@ -401,6 +421,8 @@ class Catalog:
             result["snapshot"] = digest(canonical_json(value).encode())
             result["snapshot_created_at"] = value["created_at"]
             result["snapshot_purpose"] = value.get("purpose", "recovery")
+            result["replication"] = {"status": "replica" if self._generation_pin else "snapshot",
+                                     "publication": result["publication"]}
         return result
 
     def export_revision(self, session_id: str, revision: str) -> dict:

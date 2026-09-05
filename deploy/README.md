@@ -13,6 +13,8 @@ session-search --data-dir PRIMARY_DATA replicate \
 
 Each destination needs its own outbox. Failed work keeps the same snapshot for retry. Concurrent invocations coalesce, and successful receipts let subsequent runs skip an unchanged catalog. The standby verifies the complete received snapshot before activation and then removes its incoming transfer copy. Publication identities prevent an older state or a different primary from replacing the current replica automatically.
 
+Primary status distinguishes an acknowledged publication from newer data still waiting for replication. An acknowledgement records a completed verification; it is not a live health probe. Standby status identifies its snapshot and creation time, so agents can report coverage when using failover.
+
 For Linux user services, install the two files from `systemd/` under the user's systemd unit directory. Make the installed executable available as `~/.local/bin/session-search`, and create a private `~/.config/session-search-v1/replication.env` containing absolute paths:
 
 ```text

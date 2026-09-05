@@ -8,9 +8,10 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-from session_search.core.records import canonical_json
+from session_search.core.records import canonical_json, digest
 from session_search.storage.catalog import Catalog
 from session_search.storage.objects import sync_directory
 from session_search.storage.snapshots import activate_replica, create_snapshot, verify_snapshot
@@ -52,6 +53,13 @@ def receive_replica(snapshot: Path, root: Path) -> dict:
     return result
 
 
+def record_acknowledgement(source: Path, receipt: dict):
+    directory = source / 'replication-receipts'
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    key = digest(canonical_json({name: receipt['destination'][name] for name in ('host', 'data')}).encode())
+    save_receipt(directory / (key + '.json'), receipt)
+
+
 def replicate(source: Path, outbox: Path, host: str, remote_data: str,
               remote_executable: str, *, runner=run_command) -> dict:
     if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]*', host):
@@ -69,7 +77,7 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
             return {'version': 1, 'status': 'coalesced'}
         receipt_path = outbox / 'receipt.json'
         receipt = json.loads(receipt_path.read_text()) if receipt_path.exists() else {}
-        if receipt and receipt['destination'] != destination:
+        if receipt and any(receipt['destination'][name] != destination[name] for name in ('host', 'data')):
             raise ValueError('replication outbox belongs to another destination')
         pending = outbox / 'pending'
         if pending.exists() and receipt:
@@ -82,6 +90,7 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
             if publication is None:
                 raise ValueError('initialize the primary with this version before replication')
             if not pending.exists() and receipt.get('publication') == publication:
+                record_acknowledgement(source, receipt)
                 return {'version': 1, 'status': 'up_to_date', **receipt}
             if not pending.exists():
                 create_snapshot(catalog, pending, search_only=True)
@@ -100,8 +109,10 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
                 or result.get('publication') != verified['publication']):
             raise ValueError('standby did not acknowledge the exact verified publication')
         receipt = {'destination': destination, 'snapshot': verified['snapshot'],
-                   'publication': verified['publication'], 'created_at': verified['created_at']}
+                   'publication': verified['publication'], 'created_at': verified['created_at'],
+                   'verified_at': datetime.now(timezone.utc).isoformat()}
         save_receipt(receipt_path, receipt)
+        record_acknowledgement(source, receipt)
         shutil.rmtree(pending)
         sync_directory(outbox)
         return {'version': 1, 'status': 'replicated', **receipt}

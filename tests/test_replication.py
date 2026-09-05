@@ -56,8 +56,10 @@ def test_replication_resumes_failed_transfer_and_skips_unchanged_publication(tmp
     assert publish()['status'] == 'up_to_date'
     assert len(calls) == before
     with Catalog(primary) as catalog:
+        assert catalog.status()['replication']['status'] == 'acknowledged'
         catalog.ingest(SessionRevision('s', (Event('e', 'user', 'new evidence'),)),
                        producer='d', request_id='second')
+        assert catalog.status()['replication']['status'] == 'behind'
     assert publish()['status'] == 'replicated'
     with Catalog(replica, readonly=True) as catalog:
         assert catalog.search(SearchQuery('new'))['results']
@@ -79,3 +81,15 @@ def test_replica_rejects_older_publication_and_different_primary(tmp_path):
     with pytest.raises(ValueError, match='primary identity'):
         activate_replica(tmp_path / 'other-snapshot', replica)
     assert (replica / 'CURRENT').read_text() == current
+
+
+def test_unreadable_replication_receipt_does_not_disable_search(tmp_path):
+    with Catalog(tmp_path / 'primary') as catalog:
+        catalog.ingest(SessionRevision('s', (Event('e', 'user', 'retained evidence'),)),
+                       producer='d', request_id='new')
+        receipts = catalog.root / 'replication-receipts'
+        receipts.mkdir()
+        (receipts / 'damaged.json').write_text('{')
+        result = catalog.search(SearchQuery('retained'))
+        assert result['results']
+        assert result['coverage']['replication']['status'] == 'partial'
