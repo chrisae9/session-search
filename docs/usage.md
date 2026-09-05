@@ -15,7 +15,7 @@ Capture defaults to the configured Codex home; `--codex-home` selects a differen
 
 Pass the returned citation objects unchanged to `context` as a JSON array. Search excludes the active Codex thread tree when `CODEX_THREAD_ID` is available. `--literal` bypasses embeddings; role, project, session, producer, and time filters remain strict.
 
-Add `--archive-raw` to local capture only when exact raw files should be retained. Raw files may contain content omitted or redacted from search evidence. This option is currently unavailable on lightweight remote clients.
+Add `--archive-raw` to capture only when exact raw files should be retained. Raw files may contain content omitted or redacted from search evidence. Lightweight clients stage these files and upload resumable chunks before submitting their normalized revision. Acknowledgement reclaims the transfer copy, while the original Codex file remains in place.
 
 ## Agent interface
 

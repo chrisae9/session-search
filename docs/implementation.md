@@ -12,13 +12,13 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Verified snapshot creation and atomic read-only replica activation.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
-- [ ] Resumable raw-object transfer from lightweight clients.
+- [x] Resumable raw-object transfer from lightweight clients.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Cross-host replica transport, credential revocation propagation, and recovery automation.
 - [ ] Offline installation, quality/performance evaluations, and migration.
 - [ ] Provenance clearance, GitHub publication, and deployment.
 
-Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw archival is explicitly rejected until the transfer protocol is implemented.
+Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.
 
 The present semantic provider limit applies per worker, not across hosts or processes. This is not yet the deployment-wide admission control required for release. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 

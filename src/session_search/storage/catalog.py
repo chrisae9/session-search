@@ -191,6 +191,10 @@ class Catalog:
         row = self.db.execute("SELECT fingerprint FROM checkpoints WHERE path=?", (path,)).fetchone()
         return row[0] if row else None
 
+    def has_raw(self, path: str, fingerprint: str) -> bool:
+        return self.db.execute("SELECT 1 FROM raw_sources WHERE path=? AND fingerprint=?",
+                               (path, fingerprint)).fetchone() is not None
+
     def scope(self, query: SearchQuery):
         conditions = []
         args: list = []

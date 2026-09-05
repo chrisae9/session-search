@@ -50,11 +50,14 @@ class Client:
         self.token_file = token_file
         self.opener = urllib.request.build_opener(NoRedirect())
 
-    def _request(self, endpoint: str, route: str, payload: dict | None) -> dict:
+    def _request(self, endpoint: str, route: str, payload: dict | bytes | None,
+                 *, method: str | None = None) -> dict:
         token = self.token_file.read_text().strip()
         request = urllib.request.Request(
-            endpoint + route, data=canonical_json(payload).encode() if payload is not None else None,
-            headers={"Content-Type": "application/json", "Authorization": "Bearer " + token},
+            endpoint + route, data=(payload if isinstance(payload, bytes) else
+                                   canonical_json(payload).encode() if payload is not None else None),
+            headers={"Content-Type": "application/octet-stream" if isinstance(payload, bytes)
+                     else "application/json", "Authorization": "Bearer " + token}, method=method,
         )
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
@@ -88,3 +91,35 @@ class Client:
     def upload(self, payload: dict) -> dict:
         # No alternate destination: a standby never becomes a writer implicitly.
         return self._request(self.primary, "/v1/revisions", payload)
+
+    def upload_raw(self, path: Path, digest: str) -> dict:
+        from session_search.storage.transfers import MAX_CHUNK
+        from session_search.storage.objects import ObjectStore
+        ObjectStore(path.parent).path(digest)  # Validate the URL segment.
+        route = "/v1/objects/" + digest
+        progress = self._request(self.primary, route, None)
+        total = path.stat().st_size
+        if progress["status"] == "complete":
+            if progress["offset"] != total:
+                raise RemoteError(409)
+            return progress
+        offset = progress["offset"]
+        if not isinstance(offset, int) or not 0 <= offset <= total:
+            raise RemoteError(502)
+        with path.open("rb") as source:
+            source.seek(offset)
+            while True:
+                chunk = source.read(min(MAX_CHUNK, total - offset))
+                progress = self._request(self.primary, f"{route}?offset={offset}&total={total}",
+                                         chunk, method="PUT")
+                expected = offset + len(chunk)
+                if progress.get("offset") != expected:
+                    raise RemoteError(502)
+                offset = expected
+                if progress.get("status") == "complete":
+                    break
+                if not chunk:
+                    raise RemoteError(502)
+        if progress.get("status") != "complete":
+            raise RemoteError(502)
+        return progress

@@ -211,10 +211,8 @@ def main(argv=None) -> int:
 def remote_command(args, client: Client) -> dict:
     from dataclasses import asdict
     if args.command == "capture":
-        if args.archive_raw:
-            raise ValueError("remote raw archival is not implemented; local files will be retained")
         with UploadQueue(args.data_dir) as queue:
-            result = capture_home(queue, args.codex_home, args.producer)
+            result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw)
             result["queue"] = queue.status()
             return result
     if args.command == "init":

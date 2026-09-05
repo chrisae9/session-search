@@ -56,9 +56,7 @@ def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bo
     path = path.resolve()
     before = fingerprint(path)
     if catalog.fingerprint(str(path)) == before:
-        if not archive_raw or catalog.db.execute(
-            "SELECT 1 FROM raw_sources WHERE path=? AND fingerprint=?", (str(path), before)
-        ).fetchone():
+        if not archive_raw or catalog.has_raw(str(path), before):
             return {"status": "unchanged"}
     # Preserve the rollout basename: the Codex parser uses it to distinguish
     # fork-owned evidence from inherited parent history.
