@@ -10,6 +10,73 @@ from session_search.storage.snapshots import activate_replica, create_snapshot, 
 from test_capture import rollout
 
 
+def hold_replica_reader(root, connection):
+    with Catalog(root, readonly=True):
+        connection.send("pinned")
+        connection.recv()
+
+
+def test_crashed_reader_releases_its_generation_pin(tmp_path):
+    import multiprocessing
+
+    from session_search.storage.generations import pin_current
+    import fcntl
+
+    with Catalog(tmp_path / "source") as source:
+        create_snapshot(source, tmp_path / "snapshot")
+    replica = tmp_path / "replica"
+    activate_replica(tmp_path / "snapshot", replica)
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe()
+    process = context.Process(target=hold_replica_reader, args=(replica, child))
+    process.start()
+    child.close()
+    try:
+        assert parent.poll(10)
+        assert parent.recv() == "pinned"
+        generation, pin = pin_current(replica)
+        pin.close()
+        with (generation / ".readers.lock").open("rb") as lock:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            process.terminate()
+            process.join(10)
+            assert not process.is_alive()
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        if process.is_alive():
+            process.kill()
+            process.join(10)
+        parent.close()
+
+
+def test_retention_keeps_current_previous_and_pinned_readers(tmp_path):
+    from session_search.core.records import Event, SessionRevision
+    from session_search.storage.generations import prune_replica
+    replica = tmp_path / "replica"
+    with Catalog(tmp_path / "source") as source:
+        source.ingest(SessionRevision("s", (Event("e", "user", "first evidence"),)),
+                      producer="d", request_id="first")
+        create_snapshot(source, tmp_path / "first")
+        first = activate_replica(tmp_path / "first", replica)["snapshot"]
+        with Catalog(replica, readonly=True) as reader:
+            old_cite = reader.search(SearchQuery("first"))["results"][0]["citation"]
+            for index in range(2):
+                source.ingest(SessionRevision("s", (Event("e", "user", f"updated {index}"),)),
+                              producer="d", request_id=str(index))
+                snapshot = tmp_path / f"snapshot-{index}"
+                create_snapshot(source, snapshot)
+                result = activate_replica(snapshot, replica)
+            assert result["retention"]["pinned"] == 1
+            assert reader.context([old_cite])["results"][0]["events"][0]["text"] == "first evidence"
+            assert (replica / "generations" / first).is_dir()
+        assert prune_replica(replica)["removed"] == 1
+        assert not (replica / "generations" / first).exists()
+        assert len(list((replica / "generations").iterdir())) == 2
+        with Catalog(replica, readonly=True) as reader:
+            assert reader.context([old_cite])["results"][0]["events"][0]["text"] == "first evidence"
+
+
 def test_raw_optin_snapshot_is_self_contained_after_source_disappears(tmp_path):
     path = tmp_path / "example.jsonl"
     raw = rollout("recover this evidence").encode()

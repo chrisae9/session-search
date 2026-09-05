@@ -39,6 +39,7 @@ def parser() -> argparse.ArgumentParser:
     verify.add_argument("snapshot", type=Path)
     replica = commands.add_parser("activate-replica", help="stage, verify, and activate a read-only replica")
     replica.add_argument("snapshot", type=Path)
+    commands.add_parser("prune-replica", help="retain current, previous, and actively read replica generations")
     backup = commands.add_parser("backup", help="back up and restore-verify a snapshot on two repositories")
     backup.add_argument("snapshot", type=Path)
     backup.add_argument("--repositories", type=Path, required=True)
@@ -126,7 +127,7 @@ def main(argv=None) -> int:
                         expected_plan_id=args.plan_id)
             print(canonical_json(output))
             return 0
-        if args.command in {"snapshot", "verify-snapshot", "activate-replica"}:
+        if args.command in {"snapshot", "verify-snapshot", "activate-replica", "prune-replica"}:
             from session_search.storage.snapshots import activate_replica, create_snapshot, verify_snapshot
             if client:
                 raise ValueError("snapshot administration must run on the data host")
@@ -135,6 +136,9 @@ def main(argv=None) -> int:
                     output = create_snapshot(catalog, args.destination)
             elif args.command == "verify-snapshot":
                 output = verify_snapshot(args.snapshot)
+            elif args.command == "prune-replica":
+                from session_search.storage.generations import prune_replica
+                output = prune_replica(args.data_dir)
             else:
                 output = activate_replica(args.snapshot, args.data_dir)
             print(canonical_json(output))

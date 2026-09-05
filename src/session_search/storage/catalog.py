@@ -93,14 +93,21 @@ class Catalog:
     def __init__(self, root: Path, *, readonly: bool = False):
         self.root = Path(root)
         self.readonly = readonly
+        self._generation_pin = None
         current = self.root / "CURRENT"
         if current.exists():
             if not readonly:
                 raise PermissionError("replica generations are read-only")
-            generation = current.read_text().strip()
-            if not re.fullmatch("[0-9a-f]{64}", generation):
-                raise ValueError("invalid replica generation pointer")
-            self.root = self.root / "generations" / generation
+            from session_search.storage.generations import pin_current
+            self.root, self._generation_pin = pin_current(self.root)
+        try:
+            self._open()
+        except BaseException:
+            self.close()
+            raise
+
+    def _open(self):
+        readonly = self.readonly
         path = self.root / "catalog.sqlite3"
         if readonly:
             self.db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=10)
@@ -123,7 +130,11 @@ class Catalog:
             raise ValueError("uninitialized catalog")
 
     def close(self):
-        self.db.close()
+        if hasattr(self, "db"):
+            self.db.close()
+        if self._generation_pin is not None:
+            self._generation_pin.close()
+            self._generation_pin = None
 
     def __enter__(self):
         return self

@@ -119,34 +119,35 @@ def activate_replica(snapshot: Path, replica: Path) -> dict:
         raise ValueError("refusing to activate a replica over a writable catalog")
     generations = replica / "generations"
     generations.mkdir(parents=True, exist_ok=True, mode=0o700)
+    from session_search.storage.generations import publication_lock, publish_locked, prune_replica
     generation = generations / verified["snapshot"]
-    if not generation.exists():
-        stage = Path(tempfile.mkdtemp(prefix=".transfer-", dir=generations))
-        try:
-            shutil.copytree(snapshot, stage, dirs_exist_ok=True, symlinks=False)
-            copied = verify_snapshot(stage)
-            if copied["snapshot"] != verified["snapshot"]:
-                raise ValueError("snapshot changed during transfer")
-            for path in stage.rglob("*"):
-                if path.is_file():
-                    with path.open("rb") as f:
-                        os.fsync(f.fileno())
-            sync_directory(stage)
-            os.rename(stage, generation)
-            sync_directory(generations)
-        finally:
-            if stage.exists():
-                shutil.rmtree(stage)
-    else:
-        verify_snapshot(generation)
-    fd, temporary = tempfile.mkstemp(dir=replica, prefix=".current-")
+    stage = Path(tempfile.mkdtemp(prefix=".transfer-", dir=generations))
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(verified["snapshot"])
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(temporary, replica / "CURRENT")
-        sync_directory(replica)
+        shutil.copytree(snapshot, stage, dirs_exist_ok=True, symlinks=False)
+        copied = verify_snapshot(stage)
+        if copied["snapshot"] != verified["snapshot"]:
+            raise ValueError("snapshot changed during transfer")
+        (stage / ".readers.lock").touch(mode=0o600)
+        for path in stage.rglob("*"):
+            if path.is_file():
+                with path.open("rb") as stream:
+                    os.fsync(stream.fileno())
+        # Flush nested directories before making their parent visible.
+        for path in sorted(stage.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_dir():
+                sync_directory(path)
+        sync_directory(stage)
+        with publication_lock(replica, exclusive=True):
+            if generation.exists():
+                verify_snapshot(generation)
+                if not (generation / ".readers.lock").is_file():
+                    raise ValueError("generation predates reader pinning; initialize a new replica directory")
+            else:
+                os.rename(stage, generation)
+                sync_directory(generations)
+            publish_locked(replica, verified["snapshot"])
     finally:
-        Path(temporary).unlink(missing_ok=True)
+        if stage.exists():
+            shutil.rmtree(stage)
+    verified["retention"] = prune_replica(replica)
     return verified
