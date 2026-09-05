@@ -30,6 +30,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("init", help="create an isolated catalog")
     legacy = commands.add_parser("import-legacy", help="import a verified legacy archive into a new store")
     legacy.add_argument("archive", type=Path)
+    legacy.add_argument("--allow-superseded-conflicts", action="store_true",
+                        help="permit conflicting old revisions only when a unique newer revision exists")
     commands.add_parser("status", help="inspect catalog coverage")
     snapshot = commands.add_parser("snapshot", help="create a consistent verified backup input")
     snapshot.add_argument("destination", type=Path)
@@ -93,7 +95,8 @@ def main(argv=None) -> int:
             if args.primary or args.standby or args.token_file:
                 raise ValueError("legacy import runs locally on the destination data host")
             from session_search.capture.legacy import import_archive
-            print(canonical_json(import_archive(args.archive, args.data_dir)))
+            print(canonical_json(import_archive(args.archive, args.data_dir,
+                allow_superseded_conflicts=args.allow_superseded_conflicts)))
             return 0
         if (args.standby or args.token_file) and not args.primary:
             raise ValueError("remote settings require an explicit primary endpoint")

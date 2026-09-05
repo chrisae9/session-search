@@ -101,3 +101,18 @@ def test_conflicting_older_revision_is_detected_after_newer_revision(tmp_path):
     with pytest.raises(ValueError, match="conflicting"):
         import_archive(source, destination)
     assert not destination.exists()
+    result = import_archive(source, destination, allow_superseded_conflicts=True)
+    assert result["superseded_conflicts"] == 1
+    with Catalog(destination, readonly=True) as catalog:
+        assert catalog.search(SearchQuery("insight"))["results"]
+        assert not catalog.search(SearchQuery("conflict"))["results"]
+
+
+def test_superseded_conflict_option_never_permits_ambiguous_current_head(tmp_path):
+    source, destination = tmp_path / "legacy", tmp_path / "new"
+    session, event = payloads()
+    archive(source, [record(session), record(event)], sequence=1)
+    archive(source, [record({**event, "text": "conflict"})], sequence=2)
+    with pytest.raises(ValueError, match="conflicting current"):
+        import_archive(source, destination, allow_superseded_conflicts=True)
+    assert not destination.exists()

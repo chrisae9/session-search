@@ -14,6 +14,8 @@ Use a stable archive snapshot. If its manifest frontier changes during import, t
 
 The importer selects each record's highest revision, rejects conflicting revisions, and respects tombstones. Historical adapters remain searchable. Native Codex session IDs are preserved; other adapters receive a source prefix to prevent collisions. Imported text passes through the same secret redaction used by capture.
 
+If an audited archive contains conflicting *superseded* revisions, `--allow-superseded-conflicts` permits import only when each affected record has a unique newer revision. This reproduces the original archive's latest-revision selection and reports `superseded_conflicts` in the result. Conflicting current revisions always prevent publication. Keep the original archive for historical audit; this option does not repair or copy its older variants.
+
 Old event and turn locators can be expanded through the existing context interface:
 
 ```sh

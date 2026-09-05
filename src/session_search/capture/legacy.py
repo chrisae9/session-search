@@ -117,7 +117,7 @@ def iter_records(root: Path, paths: list[Path]):
                 raise ValueError("legacy object record count mismatch")
 
 
-def import_archive(source: Path, destination: Path) -> dict:
+def import_archive(source: Path, destination: Path, *, allow_superseded_conflicts: bool = False) -> dict:
     source, destination = source.resolve(), destination.resolve()
     if destination.exists():
         raise FileExistsError("legacy import requires a new destination; existing stores are never replaced")
@@ -135,13 +135,17 @@ def import_archive(source: Path, destination: Path) -> dict:
               source TEXT,native TEXT,payload TEXT);
             CREATE TABLE producers(id TEXT,revision INTEGER,producer TEXT,PRIMARY KEY(id,revision,producer));
             CREATE TABLE revision_hashes(id TEXT,revision INTEGER,hash TEXT,PRIMARY KEY(id,revision));
+            CREATE TABLE conflicts(id TEXT,revision INTEGER,PRIMARY KEY(id,revision));
             CREATE INDEX sessions ON latest(source,native);
         """)
         for record in iter_records(source, paths):
             prior = spool.execute("SELECT hash FROM revision_hashes WHERE id=? AND revision=?",
                                   (record["record_id"], record["revision"])).fetchone()
             if prior and prior[0] != record["revision_hash"]:
-                raise ValueError("conflicting legacy record revision")
+                if not allow_superseded_conflicts:
+                    raise ValueError("conflicting legacy record revision")
+                spool.execute("INSERT OR IGNORE INTO conflicts VALUES (?,?)",
+                              (record["record_id"], record["revision"]))
             spool.execute("INSERT OR IGNORE INTO revision_hashes VALUES (?,?,?)",
                           (record["record_id"], record["revision"], record["revision_hash"]))
             payload = record["payload"]
@@ -157,6 +161,10 @@ def import_archive(source: Path, destination: Path) -> dict:
             if records % 1000 == 0:
                 spool.commit()
         spool.commit()
+        if spool.execute("SELECT 1 FROM conflicts c JOIN latest l ON c.id=l.id "
+                         "AND c.revision=l.revision LIMIT 1").fetchone():
+            raise ValueError("conflicting current legacy record revision")
+        superseded_conflicts = spool.execute("SELECT count(*) FROM conflicts").fetchone()[0]
         with Catalog(workspace / "catalog") as catalog:
             sessions = spool.execute("SELECT source,native,payload FROM latest WHERE kind='event' "
                                       "AND json_extract(payload,'$.record_type')='session' ORDER BY source,native")
@@ -207,7 +215,8 @@ def import_archive(source: Path, destination: Path) -> dict:
         os.rename(workspace / "catalog", destination)
         sync_directory(destination.parent)
         return {"version": 1, "status": "imported", "sessions": imported, "records_read": records,
-                "legacy_frontier": digest(canonical_json(frontier).encode()), "raw_archived": False}
+                "legacy_frontier": digest(canonical_json(frontier).encode()), "raw_archived": False,
+                "superseded_conflicts": superseded_conflicts}
     finally:
         spool.close()
         shutil.rmtree(workspace)
