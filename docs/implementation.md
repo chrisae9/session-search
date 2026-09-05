@@ -12,6 +12,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Three read-only MCP tools and authenticated HTTP transport.
 - [x] Verified snapshot creation and atomic read-only replica activation.
 - [x] Replica retention of current, previous, and actively pinned generations, including reader crash recovery.
+- [x] Explicit search-only replicas, excluded from recovery/offload backup inputs.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.

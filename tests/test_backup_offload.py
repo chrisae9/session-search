@@ -18,7 +18,10 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
     password = tmp_path / "password"
     password.write_text("synthetic-test-only-password")
     password.chmod(0o600)
-    repositories = [ResticRepository(name, str(tmp_path / name), password) for name in ("one", "two")]
+    restore_directory = tmp_path / "restore-work"
+    restore_directory.mkdir()
+    repositories = [ResticRepository(name, str(tmp_path / name), password, restore_directory)
+                    for name in ("one", "two")]
     for repository in repositories:
         repository.initialize()
     source = tmp_path / "example.jsonl"
@@ -46,3 +49,4 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
         assert applied["removed"] == 1
         assert not source.exists()
         assert catalog.status()["sessions"] == 1
+        assert not list(restore_directory.iterdir())

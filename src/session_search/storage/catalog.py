@@ -385,6 +385,7 @@ class Catalog:
             value = json.loads(manifest.read_text())
             result["snapshot"] = digest(canonical_json(value).encode())
             result["snapshot_created_at"] = value["created_at"]
+            result["snapshot_purpose"] = value.get("purpose", "recovery")
         return result
 
     def export_revision(self, session_id: str, revision: str) -> dict:

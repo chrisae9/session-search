@@ -35,6 +35,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="inspect catalog coverage")
     snapshot = commands.add_parser("snapshot", help="create a consistent verified backup input")
     snapshot.add_argument("destination", type=Path)
+    snapshot.add_argument("--search-only", action="store_true",
+                          help="exclude raw archival evidence; cannot be used for recovery backups")
     verify = commands.add_parser("verify-snapshot", help="check a snapshot and all its raw evidence")
     verify.add_argument("snapshot", type=Path)
     replica = commands.add_parser("activate-replica", help="stage, verify, and activate a read-only replica")
@@ -133,7 +135,7 @@ def main(argv=None) -> int:
                 raise ValueError("snapshot administration must run on the data host")
             if args.command == "snapshot":
                 with Catalog(args.data_dir.resolve(), readonly=True) as catalog:
-                    output = create_snapshot(catalog, args.destination)
+                    output = create_snapshot(catalog, args.destination, search_only=args.search_only)
             elif args.command == "verify-snapshot":
                 output = verify_snapshot(args.snapshot)
             elif args.command == "prune-replica":

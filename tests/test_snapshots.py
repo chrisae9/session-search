@@ -96,6 +96,28 @@ def test_raw_optin_snapshot_is_self_contained_after_source_disappears(tmp_path):
         assert catalog.context([cite])["results"][0]["status"] == "ok"
 
 
+def test_search_only_replica_retains_citations_but_cannot_authorize_recovery(tmp_path):
+    from session_search.storage.backups import ResticRepository
+
+    path = tmp_path / "example.jsonl"
+    path.write_text(rollout("preserve searchable evidence"))
+    snapshot = tmp_path / "search-snapshot"
+    with Catalog(tmp_path / "source") as catalog:
+        capture_file(catalog, path, "d", archive_raw=True)
+        cite = catalog.search(SearchQuery("preserve"))["results"][0]["citation"]
+        result = create_snapshot(catalog, snapshot, search_only=True)
+        assert result["purpose"] == "search-replica"
+        assert result["raw_objects"] == 0
+        assert catalog.db.execute("SELECT count(*) FROM raw_sources").fetchone()[0] == 1
+    activate_replica(snapshot, tmp_path / "replica")
+    with Catalog(tmp_path / "replica", readonly=True) as reader:
+        assert reader.context([cite])["status"] == "ok"
+        assert reader.db.execute("SELECT count(*) FROM raw_sources").fetchone()[0] == 0
+    assert not (snapshot / "objects/raw").exists()
+    with pytest.raises(ValueError, match="not recovery"):
+        ResticRepository("unused", "unused", tmp_path / "unused").backup_and_verify(snapshot)
+
+
 def test_corrupt_new_snapshot_cannot_replace_serving_replica(tmp_path):
     root = tmp_path / "catalog"
     path = tmp_path / "example.jsonl"

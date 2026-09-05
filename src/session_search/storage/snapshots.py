@@ -19,7 +19,7 @@ def file_digest(path: Path) -> str:
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
-def create_snapshot(catalog: Catalog, destination: Path) -> dict:
+def create_snapshot(catalog: Catalog, destination: Path, *, search_only: bool = False) -> dict:
     """SQLite's backup API takes a consistent view while ordinary writes continue."""
     destination = destination.resolve()
     if destination.exists():
@@ -30,6 +30,9 @@ def create_snapshot(catalog: Catalog, destination: Path) -> dict:
         target = sqlite3.connect(stage / "catalog.sqlite3")
         try:
             catalog.db.backup(target)
+            if search_only:
+                target.execute("DELETE FROM raw_sources")
+                target.commit()
             target.execute("PRAGMA journal_mode=DELETE")
             target.commit()
             objects = target.execute("SELECT DISTINCT digest,size FROM raw_sources ORDER BY digest").fetchall()
@@ -59,6 +62,7 @@ def create_snapshot(catalog: Catalog, destination: Path) -> dict:
             if dest.stat().st_size != size:
                 raise ValueError("raw object size mismatch")
         manifest = {"version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
+                    "purpose": "search-replica" if search_only else "recovery",
                     "catalog_sha256": file_digest(stage / "catalog.sqlite3"),
                     "raw_objects": [{"digest": key, "size": size} for key, size in objects]}
         content = canonical_json(manifest)
@@ -71,7 +75,7 @@ def create_snapshot(catalog: Catalog, destination: Path) -> dict:
         os.rename(stage, destination)
         sync_directory(destination.parent)
         return {"version": 1, "status": "verified", "snapshot": digest(content.encode()),
-                "raw_objects": len(objects)}
+                "raw_objects": len(objects), "purpose": manifest["purpose"]}
     finally:
         if stage.exists():
             shutil.rmtree(stage)
@@ -85,6 +89,11 @@ def verify_snapshot(path: Path) -> dict:
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("version") != 1:
         raise ValueError("unsupported snapshot version")
+    purpose = manifest.get("purpose", "recovery")
+    if purpose not in {"recovery", "search-replica"}:
+        raise ValueError("unsupported snapshot purpose")
+    if purpose == "search-replica" and manifest["raw_objects"]:
+        raise ValueError("search replica must not claim raw recovery coverage")
     if file_digest(path / "catalog.sqlite3") != manifest["catalog_sha256"]:
         raise ValueError("snapshot catalog checksum mismatch")
     with Catalog(path, readonly=True) as catalog:
@@ -107,6 +116,7 @@ def verify_snapshot(path: Path) -> dict:
                 raise ValueError("snapshot raw evidence is missing or corrupt")
         coverage = catalog.status()
     return {"version": 1, "status": "verified", "coverage": coverage,
+            "purpose": purpose,
             "snapshot": digest(canonical_json(manifest).encode()),
             "created_at": manifest["created_at"]}
 

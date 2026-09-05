@@ -15,6 +15,7 @@ class ResticRepository:
     name: str
     repository: str
     password_file: Path
+    restore_directory: Path | None = None
 
     def run(self, arguments: list[str], *, timeout: float = 3600) -> str:
         completed = subprocess.run(
@@ -33,6 +34,8 @@ class ResticRepository:
     def backup_and_verify(self, snapshot: Path) -> dict:
         snapshot = snapshot.resolve()
         expected = verify_snapshot(snapshot)
+        if expected["purpose"] != "recovery":
+            raise ValueError("search-only replicas are not recovery backup inputs")
         output = self.run(["backup", str(snapshot), "--json", "--tag", "session-search",
                            "--tag", expected["snapshot"]])
         summaries = [json.loads(line) for line in output.splitlines() if line.strip()]
@@ -47,10 +50,12 @@ class ResticRepository:
                 "source_path": str(snapshot), "status": "restore_verified"}
 
     def verify_restore(self, backup_id: str, source_path: Path, expected: str) -> dict:
-        with tempfile.TemporaryDirectory(prefix="session-search-restore-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="session-search-restore-", dir=self.restore_directory) as temporary:
             self.run(["restore", backup_id, "--target", temporary])
             restored = Path(temporary) / str(source_path.resolve()).lstrip("/")
             result = verify_snapshot(restored)
+            if result["purpose"] != "recovery":
+                raise ValueError("restored snapshot is not a recovery backup")
             if result["snapshot"] != expected:
                 raise ValueError("restored snapshot differs from the required revision set")
             return result
@@ -59,7 +64,9 @@ class ResticRepository:
 def load_repositories(path: Path) -> list[ResticRepository]:
     rows = json.loads(path.read_text())["repositories"]
     repositories = [ResticRepository(row["name"], row["repository"],
-                                      Path(row["password_file"]).expanduser()) for row in rows]
+                                      Path(row["password_file"]).expanduser(),
+                                      Path(row["restore_directory"]).expanduser()
+                                      if row.get("restore_directory") else None) for row in rows]
     if len({repo.name for repo in repositories}) != len(repositories):
         raise ValueError("backup repository names must be unique")
     return repositories
