@@ -1,0 +1,14 @@
+[Unit]
+Description=Authenticated Session Search API
+
+[Service]
+Type=simple
+Environment="SESSION_SEARCH_EMBEDDING_OPTIONS=" "SESSION_SEARCH_SERVER_OPTIONS="
+EnvironmentFile=%h/.config/session-search-v1/server.env
+ExecStart=%h/.local/bin/session-search --data-dir ${SESSION_SEARCH_DATA} $SESSION_SEARCH_EMBEDDING_OPTIONS serve --credentials ${SESSION_SEARCH_CREDENTIALS} --port ${SESSION_SEARCH_PORT} $SESSION_SEARCH_SERVER_OPTIONS
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target

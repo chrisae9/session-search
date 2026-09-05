@@ -1,4 +1,19 @@
-# Recurring replication
+# Data-host services
+
+The `systemd/session-search-server.service` user unit runs the authenticated API on loopback. Install it under the user's systemd unit directory, expose the selected release as `~/.local/bin/session-search`, and provide a private `~/.config/session-search-v1/server.env`:
+
+```text
+SESSION_SEARCH_DATA=/absolute/data/directory
+SESSION_SEARCH_CREDENTIALS=/absolute/device-registry.json
+SESSION_SEARCH_PORT=8765
+SESSION_SEARCH_SERVER_OPTIONS=
+```
+
+On a standby, set `SESSION_SEARCH_SERVER_OPTIONS=--readonly` and use the replica directory. Add `SESSION_SEARCH_EMBEDDING_OPTIONS` only when configuring an explicitly provisioned model. For a remote model it contains `--embedding-config /absolute/model-config.json --allow-remote-embeddings`. Keep bearer tokens in private credential files, never in service arguments.
+
+Verify the service locally, then put the loopback endpoint behind the host's trusted HTTPS proxy. The proxy must remain reachable only by authorized clients; requests still require a valid device token. Start the unit with `systemctl --user enable --now session-search-server.service` after checking its configuration.
+
+## Recurring replication
 
 Install Session Search with the server extra on both data hosts. The primary needs `ssh` and `rsync`, with noninteractive access to the standby's SSH alias. Both hosts must use the same release. Keep the primary and standby data directories separate from legacy archive and index paths.
 
