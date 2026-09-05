@@ -1,0 +1,96 @@
+import hashlib
+import json
+from dataclasses import asdict
+
+import pytest
+from fastapi.testclient import TestClient
+
+from session_search.core.records import Event, SessionRevision
+from session_search.interfaces.client import Client, RemoteError, validate_endpoint
+from session_search.interfaces.server import create_app
+from session_search.storage.catalog import Catalog
+
+
+@pytest.fixture
+def setup(tmp_path):
+    root = tmp_path / "data"
+    with Catalog(root):
+        pass
+    credentials = tmp_path / "devices.json"
+    credentials.write_text(json.dumps({"device": hashlib.sha256(b"test-only").hexdigest()}))
+    app = create_app(root, credentials)
+    return TestClient(app), root, credentials
+
+
+def payload(text="backup fix", expected=None):
+    revision = SessionRevision("s1", (Event("e1", "user", text),))
+    return {"request_id": revision.revision, "expected_revision": expected,
+            "session": asdict(revision)}
+
+
+HEADERS = {"Authorization": "Bearer test-only"}
+
+
+def test_authentication_revocation_and_strict_validation(setup):
+    client, _, credentials = setup
+    assert client.get("/v1/status").status_code == 401
+    assert client.get("/v1/status", headers=HEADERS).status_code == 200
+    response = client.post("/v1/search", headers=HEADERS, json={"text": "hi", "unknown": True})
+    assert response.status_code == 400
+    credentials.write_text("{}")
+    assert client.get("/v1/status", headers=HEADERS).status_code == 401
+
+
+def test_durable_upload_retry_conflict_and_search(setup):
+    client, _, _ = setup
+    first = client.post("/v1/revisions", headers=HEADERS, json=payload())
+    assert first.status_code == 200
+    assert first.json()["status"] == "durable"
+    assert client.post("/v1/revisions", headers=HEADERS, json=payload()).json()["duplicate"]
+    assert client.post("/v1/revisions", headers=HEADERS, json=payload("changed")).status_code == 409
+    new = payload("changed", first.json()["revision"])
+    assert client.post("/v1/revisions", headers=HEADERS, json=new).status_code == 200
+    assert client.post("/v1/revisions", headers=HEADERS, json=payload()).status_code == 200
+    results = client.post("/v1/search", headers=HEADERS, json={"text": "changed"}).json()
+    assert results["results"]
+
+
+def test_standby_never_accepts_upload(setup):
+    _, root, credentials = setup
+    standby = TestClient(create_app(root, credentials, readonly=True))
+    assert standby.post("/v1/revisions", headers=HEADERS, json=payload()).status_code == 409
+
+
+def test_client_failover_is_read_only_and_auth_errors_do_not_retry(tmp_path, monkeypatch):
+    client = Client("https://primary.example", tmp_path / "token", standby="https://standby.example")
+    called = []
+
+    def request(endpoint, route, payload):
+        called.append(endpoint)
+        if endpoint == client.primary:
+            raise RemoteError(503)
+        return {"version": 1, "status": "ok"}
+
+    monkeypatch.setattr(client, "_request", request)
+    assert client.read("status")["served_by"] == "standby"
+    assert len(called) == 2
+    called.clear()
+    with pytest.raises(RemoteError):
+        client.upload({})
+    assert called == [client.primary]
+
+    def unauthorized(*args):
+        raise RemoteError(401)
+
+    monkeypatch.setattr(client, "_request", unauthorized)
+    with pytest.raises(RemoteError) as error:
+        client.read("status")
+    assert error.value.status == 401
+
+
+def test_client_refuses_unencrypted_nonloopback_and_url_credentials():
+    assert validate_endpoint("http://127.0.0.1:9000")
+    with pytest.raises(ValueError):
+        validate_endpoint("http://remote.example")
+    with pytest.raises(ValueError):
+        validate_endpoint("https://user:password@remote.example")

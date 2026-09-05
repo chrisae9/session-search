@@ -1,0 +1,27 @@
+name: tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install uv
+      - name: Install Restic on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y restic
+      - name: Install Restic on macOS
+        if: runner.os == 'macOS'
+        run: brew install restic
+      - run: uv sync --locked --group dev --extra server --extra mcp --extra embeddings
+      - run: uv run --no-sync ruff check src tests
+      - run: uv run --no-sync pytest -q
+      - run: uv build
