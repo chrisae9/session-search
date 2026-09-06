@@ -17,6 +17,22 @@ from session_search.storage.objects import sync_directory
 from session_search.storage.snapshots import activate_replica, create_snapshot, verify_snapshot
 
 
+DEFAULT_RESERVE_BYTES = 2 * 1024 ** 3
+
+
+def capacity(path: Path, incoming_bytes: int, reserve_bytes: int = DEFAULT_RESERVE_BYTES) -> dict:
+    if (type(incoming_bytes) is not int or incoming_bytes < 0
+            or type(reserve_bytes) is not int or reserve_bytes < 0):
+        raise ValueError('capacity sizes must be nonnegative integers')
+    existing = path.resolve()
+    while not existing.exists():
+        existing = existing.parent
+    free = shutil.disk_usage(existing).free
+    return {'version': 1, 'status': 'ready' if free >= incoming_bytes + reserve_bytes else 'deferred',
+            'reason': 'capacity', 'free_bytes': free, 'incoming_bytes': incoming_bytes,
+            'reserve_bytes': reserve_bytes}
+
+
 def run_command(arguments: list[str]) -> str:
     try:
         result = subprocess.run(arguments, capture_output=True, text=True, timeout=300)
@@ -60,7 +76,8 @@ def record_acknowledgement(source: Path, receipt: dict):
 
 
 def replicate(source: Path, outbox: Path, host: str, remote_data: str,
-              remote_executable: str, *, runner=run_command) -> dict:
+              remote_executable: str, *, runner=run_command,
+              reserve_bytes: int = DEFAULT_RESERVE_BYTES) -> dict:
     if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]*', host):
         raise ValueError('replication host must be an SSH host alias')
     for value in (remote_data, remote_executable):
@@ -92,10 +109,27 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
                 record_acknowledgement(source, receipt)
                 return {'version': 1, 'status': 'up_to_date', **receipt}
             if not pending.exists():
+                # SQLite backup may grow while readers and writers coexist. Leave
+                # room for another catalog-sized allocation plus the reserve.
+                needed = 2 * sum(p.stat().st_size for p in catalog.root.glob('catalog.sqlite3*')
+                                 if p.is_file())
+                available = capacity(outbox, needed, reserve_bytes)
+                if available['status'] != 'ready':
+                    return {**available, 'stage': 'source_snapshot'}
                 create_snapshot(catalog, pending, search_only=True)
         verified = verify_snapshot(pending)
         incoming = remote_data.rstrip('/') + '/incoming/' + verified['snapshot']
         ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host]
+        incoming_bytes = sum(p.stat().st_size for p in pending.rglob('*') if p.is_file())
+        output = runner([*ssh, shlex.join([remote_executable, '--data-dir', remote_data,
+                        'replica-capacity', str(incoming_bytes), '--reserve-bytes', str(reserve_bytes)])])
+        available = json.loads(output)
+        if (available.get('version') != 1 or available.get('status') not in {'ready', 'deferred'}
+                or available.get('incoming_bytes') != incoming_bytes
+                or available.get('reserve_bytes') != reserve_bytes):
+            raise ValueError('standby did not acknowledge the capacity preflight')
+        if available['status'] != 'ready':
+            return {**available, 'stage': 'standby_transfer'}
         runner([*ssh, 'umask 077; ' + shlex.join(['mkdir', '-p', incoming])])
         runner(['rsync', '-a', '--partial', '--checksum', '-e',
                 'ssh -o BatchMode=yes -o ConnectTimeout=5',

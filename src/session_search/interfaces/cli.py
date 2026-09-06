@@ -51,7 +51,11 @@ def parser() -> argparse.ArgumentParser:
     replica.add_argument("snapshot", type=Path)
     receive = commands.add_parser("receive-replica", help="verify and consume a staged search replica")
     receive.add_argument("snapshot", type=Path)
+    capacity = commands.add_parser("replica-capacity", help="check room for an incoming replica and reserve")
+    capacity.add_argument("incoming_bytes", type=int)
+    capacity.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
     replicate = commands.add_parser("replicate", help="publish a search replica over SSH, resuming interrupted work")
+    replicate.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
     replicate.add_argument("--outbox", type=Path, required=True)
     replicate.add_argument("--host", required=True)
     replicate.add_argument("--remote-data", required=True)
@@ -171,13 +175,19 @@ def main(argv=None) -> int:
                         expected_plan_id=args.plan_id)
             print(canonical_json(output))
             return 0
+        if args.command == "replica-capacity":
+            from session_search.storage.replication import capacity
+            if client:
+                raise ValueError("capacity inspection runs on the data host")
+            print(canonical_json(capacity(args.data_dir, args.incoming_bytes, args.reserve_bytes)))
+            return 0
         if args.command in {"replicate", "receive-replica"}:
             from session_search.storage.replication import receive_replica, replicate
             if client:
                 raise ValueError("replication administration runs on the data host")
             output = (receive_replica(args.snapshot, args.data_dir) if args.command == "receive-replica"
                       else replicate(args.data_dir, args.outbox, args.host,
-                                     args.remote_data, args.remote_executable))
+                                     args.remote_data, args.remote_executable, reserve_bytes=args.reserve_bytes))
             print(canonical_json(output))
             return 0
         if args.command == "prepare-primary":

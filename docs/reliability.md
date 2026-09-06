@@ -52,3 +52,22 @@ Import into a separate Session Search store and prevent legacy publishers from w
 | Storage | Repeated indexing and interrupted uploads reclaim abandoned artifacts without deleting pending work or cited evidence. |
 
 Measure Session Search@10, MRR@10, query latency, peak memory, ingestion throughput, and storage reclaimed against a fixed baseline. Use synthetic fixtures for public reproduction and a private representative query set for personal relevance. Report measured tradeoffs before changing embedding models or adding retrieval features.
+
+## Replica capacity
+
+`replicate` checks local space before creating a pending search snapshot and asks
+the standby to run `replica-capacity` before starting rsync. Both hosts must run a
+version that supports this command. The default free-space reserve is 2 GiB;
+`replicate --reserve-bytes BYTES` changes it for both checks. Local admission allows
+twice the current catalog and SQLite sidecar sizes plus the reserve. Remote
+admission allows the full incoming snapshot size plus the reserve, without
+subtracting an existing partial transfer because rsync may need a new temporary
+copy. Current, previous, and pinned generations remain counted as occupied space.
+
+Insufficient capacity returns `status: deferred` with `stage: source_snapshot` or
+`stage: standby_transfer`, byte counts, and no new acknowledgement. A pending
+snapshot is retained for retry. This preflight is a point-in-time check, not an
+allocation reservation: concurrent writers and other applications can consume
+space after it passes. Keep disk monitoring and capacity planning in place;
+preflight alone does not make an undersized standby safe for routine replication
+or full raw backups.

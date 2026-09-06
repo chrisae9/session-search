@@ -7,7 +7,7 @@ import pytest
 
 from session_search.core.records import Event, SearchQuery, SessionRevision
 from session_search.storage.catalog import Catalog
-from session_search.storage.replication import receive_replica, replicate
+from session_search.storage.replication import capacity, receive_replica, replicate
 from session_search.storage.snapshots import activate_replica, create_snapshot
 
 
@@ -33,7 +33,11 @@ def test_replication_resumes_failed_transfer_and_skips_unchanged_publication(tmp
         command = arguments[-1]
         if command.startswith('umask'):
             return ''
-        target = shlex.split(command)[-1]
+        parts = shlex.split(command)
+        if 'replica-capacity' in parts:
+            index = parts.index('replica-capacity')
+            return json.dumps(capacity(replica, int(parts[index + 1]), int(parts[-1])))
+        target = parts[-1]
         result = receive_replica(Path(target), replica)
         if lose_ack:
             lose_ack = False
@@ -117,3 +121,58 @@ def test_received_replica_publishes_without_a_second_catalog_copy(tmp_path, monk
     assert published.stat().st_ino == inode
     with Catalog(replica, readonly=True) as catalog:
         assert catalog.search(SearchQuery('retained'))['results']
+
+
+def test_capacity_defers_before_snapshot_allocation(tmp_path, monkeypatch):
+    from session_search.storage import replication
+    primary, outbox = tmp_path / 'primary', tmp_path / 'outbox'
+    with Catalog(primary):
+        pass
+    monkeypatch.setattr(replication.shutil, 'disk_usage',
+                        lambda path: type('Usage', (), {'free': 0})())
+
+    def no_transport(arguments):
+        raise AssertionError('no transport should run without local snapshot space')
+
+    result = replicate(primary, outbox, 'standby', '/replica', '/session-search', runner=no_transport)
+    assert result['status'] == 'deferred' and result['stage'] == 'source_snapshot'
+    assert not (outbox / 'pending').exists()
+    assert not (outbox / 'receipt.json').exists()
+
+
+def test_capacity_deferral_retains_pending_snapshot_and_does_not_upload(tmp_path):
+    primary, outbox = tmp_path / 'primary', tmp_path / 'outbox'
+    with Catalog(primary):
+        pass
+    calls = []
+
+    def low_capacity(arguments):
+        calls.append(arguments)
+        assert arguments[0] == 'ssh'
+        parts = shlex.split(arguments[-1])
+        index = parts.index('replica-capacity')
+        return json.dumps({'version': 1, 'status': 'deferred', 'reason': 'capacity',
+                           'incoming_bytes': int(parts[index + 1]),
+                           'reserve_bytes': int(parts[-1]), 'free_bytes': 0})
+
+    def publish():
+        return replicate(primary, outbox, 'standby', '/replica', '/session-search', runner=low_capacity)
+
+    assert publish()['stage'] == 'standby_transfer'
+    manifest = (outbox / 'pending/manifest.json').read_bytes()
+    assert publish()['status'] == 'deferred'
+    assert (outbox / 'pending/manifest.json').read_bytes() == manifest
+    assert len(calls) == 2
+    assert not (outbox / 'receipt.json').exists()
+    with Catalog(primary, readonly=True) as catalog:
+        assert catalog.status()['replication']['status'] == 'not_configured'
+
+
+def test_capacity_reserve_boundary_and_invalid_sizes(tmp_path, monkeypatch):
+    monkeypatch.setattr(shutil, 'disk_usage', lambda path: type('Usage', (), {'free': 100})())
+    assert capacity(tmp_path / 'not-created', 60, 40)['status'] == 'ready'
+    assert capacity(tmp_path, 61, 40)['status'] == 'deferred'
+    assert not (tmp_path / 'not-created').exists()
+    for incoming, reserve in [(-1, 0), (1, -1), (True, 0), (1, '2')]:
+        with pytest.raises(ValueError):
+            capacity(tmp_path, incoming, reserve)

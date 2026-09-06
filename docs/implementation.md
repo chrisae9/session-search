@@ -20,6 +20,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Replica retention of current, previous, and actively pinned generations, including reader crash recovery.
 - [x] Explicit search-only replicas, excluded from recovery/offload backup inputs.
 - [x] Resumable SSH snapshot publication, unchanged-publication skipping, and five-minute timer templates.
+- [x] Source and standby capacity preflights defer replica work while preserving pending snapshots and the current replica.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
