@@ -48,6 +48,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Pilot deployment of shared raw storage, verified live uploads, and mixed-format backup restoration.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Upload completion publishes the verified staging inode without allocating a second full raw or normalized file.
+- [x] Upload status retries reclaim verified completed staging after process crashes, respecting writer fencing and per-transfer locks.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
 - [x] Verified legacy archive importer and immutable historical turn/event locator aliases.
 - [x] Explicit first-upload checkpoint adoption for legacy imports, with concurrent-update conflict protection.

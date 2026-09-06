@@ -1,5 +1,7 @@
 import hashlib
 import json
+import subprocess
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +14,83 @@ from session_search.storage.catalog import Catalog
 from session_search.storage.objects import ObjectStore
 from session_search.storage.transfers import OffsetConflict, RawTransfers
 from test_capture import rollout
+
+
+@pytest.mark.parametrize('storage', ['raw', 'chunks', 'revision-upload'])
+def test_status_reclaims_published_partial_after_process_crash(tmp_path, storage):
+    code = '''
+import hashlib, os, sys
+from pathlib import Path
+from session_search.storage.transfers import RawTransfers
+root, storage = Path(sys.argv[1]), sys.argv[2]
+data = b'synthetic upload after publication crash'
+key = hashlib.sha256(data).hexdigest()
+transfers = RawTransfers(root, namespace='raw' if storage == 'chunks' else storage,
+                        chunked=storage == 'chunks')
+partial, _ = transfers.paths('device', key)
+original = Path.unlink
+def stop_before_unlink(path, *args, **kwargs):
+    if path == partial:
+        os._exit(72)
+    return original(path, *args, **kwargs)
+Path.unlink = stop_before_unlink
+transfers.append('device', key, 0, len(data), data)
+'''
+    child = subprocess.run([sys.executable, '-c', code, str(tmp_path), storage], timeout=5)
+    assert child.returncode == 72
+    data = b'synthetic upload after publication crash'
+    key = hashlib.sha256(data).hexdigest()
+    transfers = RawTransfers(tmp_path, namespace='raw' if storage == 'chunks' else storage)
+    partial, lock = transfers.paths('device', key)
+    other, _ = transfers.paths('other', key)
+    other.write_bytes(data[:10])
+    assert partial.read_bytes() == data
+    lock_inode = lock.stat().st_ino
+    assert transfers.status('device', key) == {'version': 1, 'status': 'complete', 'offset': len(data)}
+    assert not partial.exists()
+    assert lock.stat().st_ino == lock_inode
+    assert other.read_bytes() == data[:10]
+    assert transfers.objects.verify(key)
+    assert transfers.status('device', key)['status'] == 'complete'
+
+
+def test_status_cleanup_defers_for_active_transfer_or_fenced_writer(tmp_path):
+    import fcntl
+    data = b'synthetic completed evidence'
+    key = hashlib.sha256(data).hexdigest()
+    transfers = RawTransfers(tmp_path)
+    transfers.append('device', key, 0, len(data), data)
+    partial, lock = transfers.paths('device', key)
+    partial.write_bytes(data)
+    with lock.open('a') as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        code = '''
+import json, sys
+from pathlib import Path
+from session_search.storage.transfers import RawTransfers
+print(json.dumps(RawTransfers(Path(sys.argv[1])).status('device', sys.argv[2])))
+'''
+        child = subprocess.run([sys.executable, '-c', code, str(tmp_path), key],
+                               capture_output=True, text=True, check=True, timeout=5)
+        assert json.loads(child.stdout)['status'] == 'complete'
+        assert partial.exists()
+    (tmp_path / 'FENCED.json').write_text('{}')
+    assert transfers.status('device', key)['status'] == 'complete'
+    assert partial.exists()
+    assert transfers.objects.verify(key)
+
+
+def test_status_cleanup_preserves_staging_when_completed_object_is_corrupt(tmp_path):
+    data = b'synthetic completed evidence'
+    key = hashlib.sha256(data).hexdigest()
+    transfers = RawTransfers(tmp_path)
+    transfers.append('device', key, 0, len(data), data)
+    partial, _ = transfers.paths('device', key)
+    partial.write_bytes(data)
+    transfers.objects.path(key).write_bytes(b'corrupt')
+    with pytest.raises(ValueError, match='corrupt'):
+        transfers.status('device', key)
+    assert partial.read_bytes() == data
 
 
 def test_interrupted_raw_transfer_resumes_at_durable_offset(tmp_path):

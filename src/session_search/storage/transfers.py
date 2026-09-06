@@ -51,12 +51,36 @@ class RawTransfers:
         sync_directory(completed.parent)
         sync_directory(completed.parent.parent)
 
+    def _reclaim_completed_partial(self, producer: str, key: str):
+        """Best-effort retirement of this producer's verified transfer duplicate."""
+        from session_search.storage.fencing import writer_lease
+        partial = self.staging / (digest(producer.encode()) + '-' + key + '.part')
+        if not partial.exists():
+            return
+        try:
+            with writer_lease(self.root):
+                _, lock = self.paths(producer, key)
+                with lock.open('a') as guard:
+                    # A status retry need not wait for an active append to retire
+                    # its own partial. Never unlink the stable lock inode.
+                    fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    completed = self._completed_path(key)
+                    if completed is None or not self.objects.verify(key):
+                        raise ValueError('completed object changed before staging cleanup')
+                    self._sync_completed(completed)
+                    partial.unlink(missing_ok=True)
+                    sync_directory(self.staging)
+        except (BlockingIOError, PermissionError):
+            # Fenced stores remain readable; a busy writer owns its cleanup.
+            return
+
     def status(self, producer: str, key: str) -> dict:
         completed = self._completed_path(key)
         if completed is not None:
             if not self.objects.verify(key):
                 raise ValueError("completed raw object is corrupt")
             self._sync_completed(completed)
+            self._reclaim_completed_partial(producer, key)
             return {"version": 1, "status": "complete", "offset": self.objects.size(key)}
         partial, lock = self.paths(producer, key)
         with lock.open("a") as guard:
