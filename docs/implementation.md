@@ -48,7 +48,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Additional client rollout, full independent backup coverage, and live replacement-primary rehearsal.
 - [ ] Recurring verified backup automation.
 - [x] Pilot historical import with legacy citation resolution checks.
-- [ ] Offline local-inference installation and whole-corpus quality/performance qualification.
+- [x] Apple Silicon macOS 26 native-inference bundle installation and semantic engine check with OS networking denied.
+- [ ] Additional native-runtime platforms, semantic MCP cold-start behavior, and whole-corpus quality/performance qualification.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
 - [ ] Provenance clearance, GitHub publication, and deployment.

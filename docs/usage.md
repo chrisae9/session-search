@@ -170,3 +170,39 @@ The destination must not exist. Recovery checks the repository identity, restore
 Snapshots reject capture, ingestion, and embedding writes. This command does not promote a standby, enable a server, or fence an old primary. Replacement-writer preparation and fencing remain a separate recovery requirement.
 
 `plan-offload` produces a reviewable candidate plan. `apply-offload` requires that plan's ID, re-restores both backups, checks exact revision coverage, and refuses to run while Codex writers are detected. These primitives are tested with synthetic data; complete the deployment and migration gates before using them on retained personal sessions.
+
+## Offline local inference
+
+A local semantic installation needs a compatible native `llama-cpp-python` wheel,
+its dependency wheels, and an explicitly provisioned embedding GGUF. Prepare the
+wheel bundle on a connected build host matching the target OS and architecture;
+then install the Session Search wheel with its `local` extra using
+`uv --offline pip install --no-index --find-links BUNDLE_DIRECTORY WHEEL_PATH[local]`.
+The wheel path with its extra should be shell-quoted. Python and the installer
+must already be available on the offline target.
+
+The pilot qualified Python 3.14 on Apple Silicon macOS 26 with
+`llama-cpp-python==0.3.35`, built using `GGML_METAL=ON` and `GGML_NATIVE=OFF`.
+The resulting native wheel targets macOS 26; it is not evidence of compatibility
+with older macOS versions, Linux, or Windows. Build and qualify separate bundles
+for those targets. The remote client installation does not need this runtime.
+
+The local loader verifies the configured model SHA-256, requires a pooled sequence
+vector, and disables silent token truncation. Inputs beyond its 8,192-token batch
+are rejected. Configure an embedding model whose default pooling produces a
+sequence vector; token-level vectors are not interchangeable with that result.
+See the upstream [embedding behavior](https://github.com/abetlen/llama-cpp-python#embeddings).
+
+After installing the bundle, run the native qualification separately from the unit
+suite, with OS networking denied. On the qualified macOS host:
+
+```sh
+sandbox-exec -p '(version 1)(allow default)(deny network*)' \
+  .venv/bin/python -I tests/check_local_inference.py MODEL_PATH MODEL_SHA256
+```
+
+The check requires a permission-denied network probe, loads the real model, checks
+long-input handling, indexes synthetic evidence, and verifies semantic retrieval
+and cited context. It reports elapsed time and peak memory; native model startup
+and memory are additional costs compared with keyword-only mode. This check does
+not qualify semantic MCP cold-start latency or whole-corpus retrieval quality.

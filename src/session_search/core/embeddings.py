@@ -105,10 +105,12 @@ class LocalEmbedder:
                     raise ValueError("local model digest differs from configured identity")
                 from llama_cpp import Llama
                 self.model = Llama(model_path=str(self.model_path), embedding=True,
-                                   n_ctx=8192, n_gpu_layers=-1, verbose=False)
-            result = self.model.embed(self.identity.query_instruction + text if query else text)
+                                   n_ctx=8192, n_batch=8192, n_ubatch=8192,
+                                   n_gpu_layers=-1, verbose=False)
+            result = self.model.embed(self.identity.query_instruction + text if query else text,
+                                      truncate=False)
             if result and isinstance(result[0], list):
-                result = result[0]
+                raise ValueError("local model must return a pooled sequence embedding")
             return validate_vector(result, self.identity.dimensions)
 
 
