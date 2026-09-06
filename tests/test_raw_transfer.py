@@ -346,3 +346,67 @@ def test_retry_after_chunk_recipe_publication_crash(tmp_path, monkeypatch):
     assert transfers.append("device", key, len(data), len(data), b"")["status"] == "complete"
     assert not transfers.paths("device", key)[0].exists()
     assert b"".join(ChunkStore(tmp_path).iter_bytes(key)) == data
+
+
+@pytest.mark.parametrize('chunk_raw', [False, True])
+@pytest.mark.parametrize('chunk_staging', [False, True])
+def test_disappearing_partial_retries_without_losing_queued_raw(
+    tmp_path, chunk_raw, chunk_staging,
+):
+    from session_search.interfaces.client import RemoteError
+    from session_search.core.records import SearchQuery
+
+    root = tmp_path / 'server'
+    with Catalog(root):
+        pass
+    credentials = tmp_path / 'credentials.json'
+    credentials.write_text(json.dumps({'device': hashlib.sha256(b'test-only').hexdigest()}))
+    http = TestClient(create_app(root, credentials, chunk_raw=chunk_raw))
+    client = Client('http://127.0.0.1:1234', tmp_path / 'token')
+    source = tmp_path / 'synthetic.jsonl'
+    source.write_text(rollout('recover interrupted transfer', sid='synthetic'))
+    original = source.read_bytes()
+    key = hashlib.sha256(original).hexdigest()
+    transfers = RawTransfers(root, chunked=chunk_raw)
+    transfers.append('device', key, 0, len(original), original[:10])
+    partial, lock = transfers.paths('device', key)
+    lock_inode = lock.stat().st_ino
+    removed = False
+
+    def request(endpoint, route, payload, *, method=None):
+        nonlocal removed
+        kwargs = {'headers': {'Authorization': 'Bearer test-only'}}
+        if isinstance(payload, bytes):
+            kwargs['content'] = payload
+        elif payload is not None:
+            kwargs['json'] = payload
+        response = http.request(method or ('POST' if payload is not None else 'GET'), route, **kwargs)
+        if response.status_code != 200:
+            raise RemoteError(response.status_code)
+        result = response.json()
+        if route == '/v1/objects/' + key and payload is None and not removed:
+            assert result['offset'] == 10
+            # Synthetic loss after GET: the next PUT carries a now-stale offset.
+            partial.unlink()
+            removed = True
+        return result
+
+    client._request = request
+    with UploadQueue(tmp_path / 'client') as queue:
+        capture_file(queue, source, 'device', archive_raw=True, chunk_raw=chunk_staging)
+        assert queue.flush(client, now=0)['failed'] == 1
+        assert queue.db.execute('SELECT state FROM pending').fetchone()[0] == 'pending'
+        assert queue.db.execute('SELECT COUNT(*) FROM raw_acknowledgements').fetchone()[0] == 0
+        assert b''.join(ObjectStore(queue.root).iter_bytes(key)) == original
+        with Catalog(root, readonly=True) as catalog:
+            assert catalog.db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0] == 0
+        assert queue.flush(client, now=10)['sent'] == 1
+        assert queue.status()['pending'] == 0
+        assert queue.db.execute('SELECT COUNT(*) FROM raw_acknowledgements').fetchone()[0] == 1
+    assert source.read_bytes() == original
+    assert lock.stat().st_ino == lock_inode
+    assert b''.join(ObjectStore(root).iter_bytes(key)) == original
+    with Catalog(root, readonly=True) as catalog:
+        result = catalog.search(SearchQuery('recover interrupted transfer', literal=True))
+        assert result['results']
+        assert catalog.context([result['results'][0]['citation']])['status'] == 'ok'

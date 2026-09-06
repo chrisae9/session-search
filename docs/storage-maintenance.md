@@ -39,6 +39,14 @@ an object is unreferenced. Receipt retention must preserve recovery references
 and interrupted-cycle recovery. Generic recursive deletion is not a supported
 maintenance workflow.
 
+The queue can recover from a raw partial disappearing between its status lookup
+and next append: the stale offset receives retryable HTTP 503, the client retains
+its exact staged bytes, and the next flush starts from current server progress.
+Regression tests cover file and shared-chunk layouts on both sides, verify that
+no raw acknowledgement precedes completion, and expand the eventual citation.
+This establishes a retry prerequisite; it does not authorize expiry, prove that
+a particular partial is disposable, or qualify normalized-transfer maintenance.
+
 ## Implementation references
 
 Client staging is implemented in
