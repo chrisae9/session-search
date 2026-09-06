@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,40 @@ from session_search.storage.objects import sync_directory
 
 TTL = 900
 MAX_JOBS = 32
+
+
+def cleanup_scratch(record: dict):
+    """Called only while holding the lock also inherited by active restores."""
+    for index, value in enumerate(record.get('scratch', [])):
+        path = Path(value)
+        if not path.is_absolute() or path.name != f'.offload-{record["job_id"]}-{index}' or path.is_symlink():
+            raise ValueError('invalid verification scratch identity')
+        if not path.exists():
+            continue
+        marker = path / 'owner.json'
+        if not marker.exists():
+            # Only marker staging can exist before ownership is published.
+            for child in path.iterdir():
+                if not child.name.startswith('.verification-') or child.is_symlink() or not child.is_file():
+                    raise ValueError('unowned verification scratch is not empty')
+                child.unlink()
+            path.rmdir()
+            continue
+        if read_record(marker) != {'version': 1, 'job_id': record['job_id']}:
+            raise ValueError('verification scratch ownership changed')
+        # Keep the marker until every restore member is removed. Interrupted
+        # cleanup can then verify ownership again and finish on the next run.
+        for child in path.iterdir():
+            if child == marker:
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        marker.unlink()
+        path.rmdir()
+        sync_directory(path.parent)
+    record.pop('scratch', None)
 
 
 def write_record(path: Path, value: dict):
@@ -87,6 +122,10 @@ class VerificationJobs:
                 return {'version': 1, 'status': 'unavailable'}
             for old_path in paths:
                 old = read_record(old_path)
+                try:
+                    cleanup_scratch(old)
+                except (OSError, ValueError):
+                    return {'version': 1, 'status': 'unavailable'}
                 if old['status'] in {'queued', 'running'}:
                     old.update(status='interrupted', completed_at=now, expires_at=now + TTL)
                     write_record(old_path, old)
@@ -153,8 +192,19 @@ def run_job(path: Path, lock_fd: int):
         from session_search.storage.backups import load_repositories
         from session_search.storage.offload import verify_offload_backups
         from dataclasses import replace
-        repositories = [replace(repo, inherited_lock_fd=lock_fd)
-                        for repo in load_repositories(Path(record['repositories_path']))]
+        repositories = []
+        for index, repo in enumerate(load_repositories(Path(record['repositories_path']))):
+            parent = (repo.restore_directory or Path(tempfile.gettempdir())).absolute()
+            scratch = parent / f'.offload-{record["job_id"]}-{index}'
+            if scratch.exists() or scratch.is_symlink():
+                raise FileExistsError('verification scratch already exists')
+            # Publish intent first, so even a crash during directory creation
+            # leaves a discoverable, narrowly identified cleanup target.
+            record.setdefault('scratch', []).append(str(scratch))
+            write_record(path, record)
+            scratch.mkdir(mode=0o700)
+            write_record(scratch / 'owner.json', {'version': 1, 'job_id': record['job_id']})
+            repositories.append(replace(repo, inherited_lock_fd=lock_fd, restore_directory=scratch))
         receipt = read_record(Path(record['receipt_path']))
         proof = verify_offload_backups(receipt, record['requirements'], repositories)
         record.update(status='restore_verified', proof=proof)
@@ -162,6 +212,10 @@ def run_job(path: Path, lock_fd: int):
         # Exception text can contain repository credentials or private paths.
         record['status'] = 'failed'
     finally:
+        try:
+            cleanup_scratch(record)
+        except (OSError, ValueError):
+            record['status'] = 'failed'
         now = time.time()
         record.update(completed_at=now, expires_at=now + TTL)
         write_record(path, record)
