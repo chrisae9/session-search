@@ -129,7 +129,7 @@ class UploadQueue:
                     "reclaimed_bytes": max(0, before - path.stat().st_size)}
 
     def flush(self, client: Client, *, limit: int = 100, now: float | None = None,
-              bootstrap_imports: bool = False) -> dict:
+              bootstrap_imports: bool = False, reconcile_raw_prefixes: bool = False) -> dict:
         if not 1 <= limit <= 1000:
             raise ValueError("flush limit must be between 1 and 1000")
         with (self.root / ".flush.lock").open("a") as lock:
@@ -139,9 +139,62 @@ class UploadQueue:
                 return {"version": 1, "status": "coalesced", "sent": 0, "failed": 0,
                         "queue": self.status()}
             bootstrapped = self._bootstrap_imports(client, limit) if bootstrap_imports else 0
+            reconciled = self._reconcile_raw_prefixes(client, limit) if reconcile_raw_prefixes else 0
             result = self._flush(client, limit=limit, now=now)
             result["bootstrapped"] = bootstrapped
+            result["reconciled"] = reconciled
             return result
+
+    def _reconcile_raw_prefixes(self, client: Client, limit: int) -> int:
+        import hashlib
+        from session_search.storage.objects import ObjectStore
+        rows = self.db.execute(
+            "SELECT p.seq,p.session_id,json_extract(p.payload,'$.raw') raw FROM pending p "
+            "WHERE p.state IN ('pending','conflict') AND json_extract(p.payload,'$.session.source')='codex' "
+            "AND json_type(p.payload,'$.raw')='object' "
+            "AND NOT EXISTS(SELECT 1 FROM pending older WHERE older.session_id=p.session_id "
+            "AND older.seq<p.seq) ORDER BY p.seq LIMIT ?", (limit,),
+        ).fetchall()
+        reconciled = 0
+        for start in range(0, len(rows), 10):
+            batch = rows[start:start + 10]
+            heads = client.recovery_heads([row['session_id'] for row in batch])
+            for row in batch:
+                if row['session_id'] not in heads:
+                    with self.db:
+                        self.db.execute(
+                            "UPDATE pending SET payload=json_set(payload,'$.expected_revision',NULL),"
+                            "state='pending',next_attempt=0 WHERE seq=?", (row['seq'],),
+                        )
+                    reconciled += 1
+                    continue  # Commit still compares against an absent head.
+                head = heads.get(row['session_id'], {})
+                previous = head.get('raw')
+                raw = json.loads(row['raw'])
+                if (head.get('source') != 'codex' or not previous
+                        or raw['size'] < previous['size']):
+                    continue
+                hasher = hashlib.sha256()
+                remaining = previous['size']
+                try:
+                    with ObjectStore(self.root).path(raw['digest']).open('rb') as source:
+                        while remaining:
+                            chunk = source.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                            remaining -= len(chunk)
+                except OSError:
+                    continue  # Retain the conflict if staging cannot prove ancestry.
+                if remaining or hasher.hexdigest() != previous['digest']:
+                    continue
+                with self.db:
+                    self.db.execute(
+                        "UPDATE pending SET payload=json_set(payload,'$.expected_revision',?),"
+                        "state='pending',next_attempt=0 WHERE seq=?", (head['revision'], row['seq']),
+                    )
+                reconciled += 1
+        return reconciled
 
     def _bootstrap_imports(self, client: Client, limit: int) -> int:
         rows = self.db.execute("SELECT p.seq,p.session_id FROM pending p "

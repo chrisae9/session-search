@@ -118,6 +118,34 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                 f"WHERE h.session_id IN ({placeholders})", sessions).fetchall()
         return {"version": 1, "heads": {r["session_id"]: dict(r) for r in rows}}
 
+    @app.post("/v1/recovery-heads")
+    def recovery_heads(data: dict):
+        if readonly:
+            raise HTTPException(409, "recovery checkpoints must come from the primary")
+        sessions = data.get("sessions")
+        if (set(data) != {"sessions"} or not isinstance(sessions, list)
+                or not 1 <= len(sessions) <= 10
+                or not all(isinstance(s, str) and 0 < len(s) <= 256 for s in sessions)):
+            raise HTTPException(400, "recovery lookup requires 1–10 session identities")
+        heads = {}
+        with read() as catalog:
+            catalog.db.execute("BEGIN")
+            for sid in sessions:
+                row = catalog.db.execute(
+                    "SELECT h.session_id,h.revision,CASE WHEN r.source='codex' THEN 'codex' "
+                    "ELSE 'unsupported' END source FROM heads h JOIN revisions r "
+                    "ON r.session_id=h.session_id AND r.revision=h.revision WHERE h.session_id=?",
+                    (sid,),
+                ).fetchone()
+                if row is None:
+                    continue
+                raw = catalog.db.execute(
+                    "SELECT digest,size FROM raw_sources WHERE session_id=? AND revision=? "
+                    "ORDER BY size DESC,digest LIMIT 1", (sid, row['revision']),
+                ).fetchone()
+                heads[sid] = {**dict(row), "raw": dict(raw) if raw else None}
+        return {"version": 1, "heads": heads}
+
     @app.get("/v1/objects/{key}")
     def raw_status(key: str, request: Request):
         if readonly:

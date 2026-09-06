@@ -73,6 +73,8 @@ def parser() -> argparse.ArgumentParser:
     flush.add_argument("--limit", type=int, default=100)
     flush.add_argument("--bootstrap-imports", action="store_true",
                        help="adopt exact legacy import heads before the first native upload")
+    flush.add_argument("--reconcile-raw-prefixes", action="store_true",
+                       help="rebase queued Codex revisions only against proven raw-file prefixes")
     serve = commands.add_parser("serve", help="serve HTTP on loopback behind a TLS proxy")
     serve.add_argument("--credentials", type=Path, required=True)
     serve.add_argument("--port", type=int, default=8765)
@@ -96,6 +98,8 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--producer", required=True, help="stable identity of this installation")
     capture.add_argument("--archive-raw", action="store_true",
                          help="explicitly retain exact raw session files in this local catalog")
+    capture.add_argument("--force", action="store_true",
+                         help="explicit recovery: recapture files even when checkpoints match")
     search = commands.add_parser("search", help="retrieve cited evidence")
     search.add_argument("query")
     search.add_argument("--literal", action="store_true")
@@ -233,7 +237,8 @@ def main(argv=None) -> int:
             if not client:
                 raise ValueError("flush requires remote mode")
             with UploadQueue(args.data_dir) as queue:
-                output = queue.flush(client, limit=args.limit, bootstrap_imports=args.bootstrap_imports)
+                output = queue.flush(client, limit=args.limit, bootstrap_imports=args.bootstrap_imports,
+                                     reconcile_raw_prefixes=args.reconcile_raw_prefixes)
             print(canonical_json(output))
             return 0
         if args.command == "compact-client":
@@ -252,7 +257,8 @@ def main(argv=None) -> int:
             if args.command in {"init", "status"}:
                 output = {"version": 1, "status": "ok", "coverage": catalog.status()}
             elif args.command == "capture":
-                output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw)
+                output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw,
+                                      force=args.force)
             elif args.command == "search":
                 exclude = list(args.exclude_session)
                 current = os.environ.get("CODEX_THREAD_ID")
@@ -290,7 +296,8 @@ def remote_command(args, client: Client) -> dict:
     from dataclasses import asdict
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
-            result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw)
+            result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw,
+                                  force=args.force)
             result["queue"] = queue.status()
             return result
     if args.command == "init":

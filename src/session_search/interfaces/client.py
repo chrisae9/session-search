@@ -129,6 +129,25 @@ class Client:
     def upload_raw(self, path: Path, digest: str) -> dict:
         return self._upload_object(path, digest, "/v1/objects/")
 
+    def recovery_heads(self, sessions: list[str]) -> dict:
+        import re
+        result = self._request(self.primary, "/v1/recovery-heads", {"sessions": sessions})
+        heads = result.get("heads")
+        if not isinstance(heads, dict) or set(heads) - set(sessions):
+            raise RemoteError(502)
+        for sid, head in heads.items():
+            if (not isinstance(head, dict) or head.get('session_id') != sid
+                    or not isinstance(head.get('revision'), str)
+                    or not re.fullmatch('[0-9a-f]{64}', head['revision'])):
+                raise RemoteError(502)
+            raw = head.get('raw')
+            if raw is not None and (not isinstance(raw, dict)
+                    or type(raw.get('size')) is not int or not 0 < raw['size'] <= 32 * 1024 ** 3
+                    or not isinstance(raw.get('digest'), str)
+                    or not re.fullmatch('[0-9a-f]{64}', raw['digest'])):
+                raise RemoteError(502)
+        return heads
+
     def _upload_object(self, path: Path, digest: str, route_prefix: str) -> dict:
         from session_search.storage.transfers import MAX_CHUNK
         from session_search.storage.objects import ObjectStore

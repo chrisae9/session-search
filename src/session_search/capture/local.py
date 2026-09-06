@@ -53,17 +53,19 @@ def normalize_session(parsed) -> SessionRevision:
     )
 
 
-def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False) -> dict:
+def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
+                 force: bool = False) -> dict:
     # A lightweight client's staging copy must survive until its queue record is
     # committed, even when another process finishes uploading the same object.
     with getattr(catalog, "capture_guard", nullcontext)():
-        return _capture_file(catalog, path, producer, archive_raw=archive_raw)
+        return _capture_file(catalog, path, producer, archive_raw=archive_raw, force=force)
 
 
-def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False) -> dict:
+def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
+                  force: bool = False) -> dict:
     path = path.resolve()
     before = fingerprint(path)
-    if catalog.fingerprint(str(path)) == before:
+    if not force and catalog.fingerprint(str(path)) == before:
         if not archive_raw or catalog.has_raw(str(path), before):
             return {"status": "unchanged"}
     # Preserve the rollout basename: the Codex parser uses it to distinguish
@@ -109,7 +111,8 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
             "complete_bytes": complete_bytes, "partial_tail": partial_tail}
 
 
-def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bool = False) -> dict:
+def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bool = False,
+                 force: bool = False) -> dict:
     home = home.resolve()
     files = {}
     accessible_roots = 0
@@ -123,7 +126,7 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
     counts: dict[str, int] = {}
     for path in sorted(files.values()):
         try:
-            result = capture_file(catalog, path, producer, archive_raw=archive_raw)
+            result = capture_file(catalog, path, producer, archive_raw=archive_raw, force=force)
             label = result["status"]
             counts[label] = counts.get(label, 0) + 1
         except (OSError, ValueError) as exc:
