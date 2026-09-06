@@ -55,7 +55,9 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Raw-prefix checkpoint reconciliation and forced recapture after client loss or an older primary restore.
 - [x] Bounded sync cycles with backlog admission, overlap prevention, and Linux/macOS scheduling templates.
 - [x] Pilot macOS recurring capture with successful scheduled uploads and timestamped status.
-- [ ] Global embedding admission control and bounded archival maintenance retention.
+- [ ] Global embedding admission across independent catalogs or unrelated endpoint clients.
+- [x] Storage-maintenance ownership audit distinguishing automatic cleanup from retained state; see [storage maintenance](storage-maintenance.md).
+- [ ] Bounded server staging and archival maintenance retention, with separate recovery-safe receipt retention.
 - [x] Pilot authenticated primary/standby deployment, actual MCP search failover, and credential revocation propagation.
 - [ ] Additional client rollout, full independent backup coverage, and live replacement-primary rehearsal.
 - [x] Retryable backup cycles, per-destination restore receipts, capacity checks, status, and six-hour timer template.

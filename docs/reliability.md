@@ -33,6 +33,10 @@ Permanent primary loss requires an operator to fence the old writer, restore val
 
 Bound downloaded context caches, reclaim completed transfer staging, and retire obsolete unpinned index generations. Pending work is retained with backpressure. Canonical evidence deletion and backup pruning remain manual in v1. Backup credentials must be recoverable independently of the primary.
 
+See [storage maintenance](storage-maintenance.md) for implemented cleanup triggers
+and retained artifacts. In particular, abandoned server partial uploads and
+completed backup receipts do not yet have bounded retention.
+
 Check which other jobs manage a backup destination. A repository inside an rsync
 mirror can be deleted as destination-only data. Protect its directory with an
 explicit receiver-side rule, or place it outside the mirror; an exclusion alone
