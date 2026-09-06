@@ -131,3 +131,19 @@ def test_cli_capture_uses_persistent_checkpoint_and_reports_work(tmp_path, capsy
     result = json.loads(capsys.readouterr().out)
     assert result["parser"]["incremental"] == 1
     assert result["parser"]["reused_events"] == 1
+
+
+def test_optional_cache_preserves_reserve_and_rejects_deep_json(tmp_path, monkeypatch):
+    import hashlib
+    import shutil
+    import zlib
+    path, cp = checkpoint(tmp_path)
+    cache = CheckpointCache(tmp_path / "cache")
+    assert cache.save(path, cp)
+    monkeypatch.setattr("session_search.capture.checkpoints.shutil.disk_usage",
+                        lambda root: shutil._ntuple_diskusage(1, 1, 0))
+    assert not cache.save(path, cp)
+    assert cache.load(path) == cp
+    raw = b"[" * 3000 + b"]" * 3000
+    next(cache.root.glob("*.cache")).write_bytes(hashlib.sha256(raw).digest() + zlib.compress(raw))
+    assert cache.load(path) is None

@@ -278,7 +278,8 @@ This does not skip raw archival or change the capture byte and space preflights.
 
 Checkpoints live in `DATA_DIRECTORY/parser-checkpoints`, with a 512 MiB encoded
 file budget and a 128 MiB decoded entry limit. Old entries are evicted when needed;
-replacement reserves room for both old and new entries. Oversized, unavailable,
+replacement reserves room for both old and new entries and preflights an extra
+64 MiB of free space. Oversized, unavailable,
 corrupt, or incompatible entries fall back to full parsing. Checkpoints contain
 redacted normalized events and ownership metadata, are private, and are not
 included in recovery snapshots. They are an optimization, not recovery evidence.

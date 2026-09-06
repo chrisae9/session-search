@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 import zlib
 from dataclasses import asdict
@@ -108,7 +109,7 @@ class CheckpointCache:
             result = decode(data, key)
             os.utime(path, None)
             return result
-        except (OSError, ValueError, KeyError, TypeError, zlib.error, OverflowError):
+        except (OSError, ValueError, KeyError, TypeError, zlib.error, OverflowError, RecursionError):
             return None
 
     def save(self, source: Path, checkpoint: ParseCheckpoint | None):
@@ -124,6 +125,8 @@ class CheckpointCache:
                 return False
             data = hashlib.sha256(raw).digest() + zlib.compress(raw, level=3)
             if len(data) > min(self.budget, MAX_DECODED):
+                return False
+            if shutil.disk_usage(self.root).free < len(data) + 64 * 1024 ** 2:
                 return False
             target = self.root / (key + ".cache")
             with (self.root / ".lock").open("a") as lock:
@@ -151,7 +154,7 @@ class CheckpointCache:
                 os.replace(temporary, target)
                 sync_directory(self.root)
             return True
-        except (OSError, ValueError, KeyError, TypeError, zlib.error):
+        except (OSError, ValueError, KeyError, TypeError, zlib.error, RecursionError):
             return False
         finally:
             if temporary is not None:
