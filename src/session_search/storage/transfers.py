@@ -29,11 +29,20 @@ class RawTransfers:
         stem = digest(producer.encode()) + "-" + key
         return self.staging / (stem + ".part"), self.staging / (stem + ".lock")
 
+    def _sync_completed(self, completed: Path):
+        # A reader can encounter an object linked by a different producer just
+        # before that process crashes. Make publication durable before acking it.
+        with completed.open("rb") as stream:
+            os.fsync(stream.fileno())
+        sync_directory(completed.parent)
+        sync_directory(self.objects.root)
+
     def status(self, producer: str, key: str) -> dict:
         completed = self.objects.path(key)
         if completed.exists():
             if not self.objects.verify(key):
                 raise ValueError("completed raw object is corrupt")
+            self._sync_completed(completed)
             return {"version": 1, "status": "complete", "offset": completed.stat().st_size}
         partial, lock = self.paths(producer, key)
         with lock.open("a") as guard:
@@ -58,6 +67,11 @@ class RawTransfers:
             if completed.exists():
                 if not self.objects.verify(key) or completed.stat().st_size != total:
                     raise ValueError("completed object does not match upload")
+                self._sync_completed(completed)
+                # A prior process may have published the object but crashed
+                # before dropping its staging link. The verified object wins.
+                partial.unlink(missing_ok=True)
+                sync_directory(self.staging)
                 return {"version": 1, "status": "complete", "offset": total}
             observed = partial.stat().st_size if partial.exists() else 0
             if offset != observed:
@@ -75,9 +89,17 @@ class RawTransfers:
             with partial.open("rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != key:
                     raise ValueError("completed upload checksum mismatch")
-            result = self.objects.put(partial)
-            if result["digest"] != key:
-                raise ValueError("raw object changed during completion")
+            # Both paths are managed under the same data root. Publish the
+            # fsynced, checksum-verified inode without allocating a second full
+            # file. Exclusive link creation also handles another producer that
+            # completed the identical object concurrently.
+            completed.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                os.link(partial, completed)
+            except FileExistsError:
+                if not self.objects.verify(key) or completed.stat().st_size != total:
+                    raise ValueError("existing completed upload is corrupt") from None
+            self._sync_completed(completed)
             partial.unlink()
             sync_directory(self.staging)
             return {"version": 1, "status": "complete", "offset": current}

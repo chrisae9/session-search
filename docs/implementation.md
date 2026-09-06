@@ -28,6 +28,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.
+- [x] Upload completion publishes the verified staging inode without allocating a second full raw or normalized file.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
 - [x] Verified legacy archive importer and immutable historical turn/event locator aliases.
 - [x] Explicit first-upload checkpoint adoption for legacy imports, with concurrent-update conflict protection.

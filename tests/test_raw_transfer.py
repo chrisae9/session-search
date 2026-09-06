@@ -173,3 +173,48 @@ def test_ack_cleanup_cannot_remove_an_object_being_recaptured(tmp_path):
         assert queue.flush(Online())['sent'] == 1
         assert not ObjectStore(root).path(raw['digest']).exists()
         assert source.exists()
+
+
+@pytest.mark.parametrize("namespace", ["raw", "revision-upload"])
+def test_completion_publishes_staging_inode_without_a_full_copy(tmp_path, monkeypatch, namespace):
+    data = b"synthetic upload" * 100
+    key = hashlib.sha256(data).hexdigest()
+    transfers = RawTransfers(tmp_path, namespace=namespace)
+    transfers.append("device", key, 0, len(data), data[:30])
+    partial, _ = transfers.paths("device", key)
+    inode = partial.stat().st_ino
+
+    def unexpected_copy(*args, **kwargs):
+        raise AssertionError("completion must reuse the verified staging inode")
+
+    monkeypatch.setattr(ObjectStore, "put", unexpected_copy)
+    result = transfers.append("device", key, 30, len(data), data[30:])
+    assert result["status"] == "complete"
+    assert transfers.objects.path(key).stat().st_ino == inode
+    assert transfers.objects.path(key).read_bytes() == data
+    assert not partial.exists()
+
+
+def test_retry_after_publication_crash_keeps_exact_object_and_removes_staging(tmp_path, monkeypatch):
+    from session_search.storage import transfers as module
+    data = b"synthetic upload survives lost completion"
+    key = hashlib.sha256(data).hexdigest()
+    transfers = RawTransfers(tmp_path)
+    link = module.os.link
+
+    def publish_then_crash(source, destination):
+        link(source, destination)
+        raise RuntimeError("injected crash after object publication")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module.os, "link", publish_then_crash)
+        with pytest.raises(RuntimeError, match="injected crash"):
+            transfers.append("device", key, 0, len(data), data)
+    partial, _ = transfers.paths("device", key)
+    assert partial.exists()
+    inode = partial.stat().st_ino
+    assert transfers.status("device", key)["status"] == "complete"
+    assert transfers.append("device", key, len(data), len(data), b"")["status"] == "complete"
+    assert not partial.exists()
+    assert transfers.objects.path(key).stat().st_ino == inode
+    assert transfers.objects.path(key).read_bytes() == data
