@@ -5,6 +5,9 @@ import fcntl
 import sqlite3
 import time
 import shutil
+import os
+import re
+import stat
 from dataclasses import asdict
 from contextlib import contextmanager, ExitStack
 from pathlib import Path
@@ -164,15 +167,24 @@ class UploadQueue:
         # Validate every managed path before any removal. Unexpected layouts or
         # corrupt recipes defer cleanup, preserving evidence for inspection.
         members = {}
+        temporaries = []
         for kind in ("recipes", "chunks"):
             directory = chunks.path(kind, "0" * 64).parent.parent
             members[kind] = {}
             if not directory.exists():
                 continue
             for bucket in directory.iterdir():
-                if bucket.is_symlink() or not bucket.is_dir():
+                if (bucket.is_symlink() or not bucket.is_dir()
+                        or not re.fullmatch('[0-9a-f]{2}', bucket.name)):
                     raise ValueError("unexpected staging directory")
                 for path in bucket.iterdir():
+                    if re.fullmatch(r'\.chunk-[a-z0-9_]{8}', path.name):
+                        info = path.lstat()
+                        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                                or stat.S_IMODE(info.st_mode) != 0o600):
+                            raise ValueError("unexpected staging temporary")
+                        temporaries.append(path)
+                        continue
                     key = bucket.name + path.name
                     if chunks.path(kind, key) != path or not path.is_file():
                         raise ValueError("unexpected staging member")
@@ -198,7 +210,14 @@ class UploadQueue:
                     path.unlink()
                     sync_directory(path.parent)
                     removed += 1
-        return {"status": "complete", "removed_members": removed}
+        # mkstemp files can survive process death before or after hard-link
+        # publication. Neither queue payloads nor recipes address these names.
+        # Validate all durable roots above before reclaiming these aliases.
+        for path in temporaries:
+            path.unlink()
+            sync_directory(path.parent)
+        return {"status": "complete", "removed_members": removed,
+                "removed_temporaries": len(temporaries)}
 
     def _reconcile_raw_prefixes(self, client: Client, limit: int) -> int:
         import hashlib

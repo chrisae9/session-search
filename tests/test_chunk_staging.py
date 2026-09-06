@@ -1,4 +1,6 @@
 import pytest
+import subprocess
+import sys
 
 from session_search.capture.queue import UploadQueue
 from session_search.core.records import Event, SessionRevision
@@ -22,6 +24,80 @@ class Receiver:
         value = dict(payload['session'])
         value['events'] = tuple(Event(**event) for event in value['events'])
         return {'status': 'durable', 'revision': SessionRevision(**value).revision}
+
+
+@pytest.mark.parametrize('kind', ['chunks', 'recipes'])
+@pytest.mark.parametrize('linked', [False, True])
+def test_process_crash_temporary_cleanup_preserves_pending_raw(tmp_path, kind, linked):
+    source = tmp_path / 'native'
+    source.write_bytes(b'pending original')
+    root = tmp_path / 'client'
+    with UploadQueue(root) as queue:
+        raw = stage(queue, source, 'pending')
+        with queue.db:
+            queue.db.execute("UPDATE pending SET state='conflict'")
+    interrupted = tmp_path / 'interrupted'
+    interrupted.write_bytes(b'interrupted capture')
+    code = '''
+import os, sys
+from pathlib import Path
+from session_search.capture.queue import UploadQueue
+from session_search.storage.chunks import ChunkStore
+original = os.link
+def crash(source, destination):
+    if sys.argv[3] in destination.parts:
+        if sys.argv[4] == 'True':
+            original(source, destination)
+        os._exit(23)
+    return original(source, destination)
+os.link = crash
+with UploadQueue(Path(sys.argv[1])) as queue, queue.capture_guard():
+    ChunkStore(queue.root).put(Path(sys.argv[2]))
+'''
+    result = subprocess.run([sys.executable, '-c', code, str(root), str(interrupted),
+                             kind, str(linked)], timeout=20)
+    assert result.returncode == 23
+    chunks = ChunkStore(root)
+    assert list(chunks.root.glob('*/*/.chunk-*'))
+    with UploadQueue(root) as queue:
+        result = queue.flush(Receiver())['chunk_cleanup']
+        assert result['status'] == 'complete'
+        assert result['removed_temporaries'] == 1
+        assert chunks.verify(raw['digest'])
+        assert queue.status()['pending'] == 1
+        assert not list(chunks.root.glob('*/*/.chunk-*'))
+        assert queue.flush(Receiver())['chunk_cleanup']['removed_members'] == 0
+    assert source.read_bytes() == b'pending original'
+
+
+@pytest.mark.parametrize('problem', ['symlink', 'permissions', 'unknown_name', 'missing_recipe'])
+def test_temporary_cleanup_defers_before_removal_on_invalid_state(tmp_path, problem):
+    import os
+    import tempfile
+    source = tmp_path / 'native'
+    source.write_bytes(b'pending original')
+    with UploadQueue(tmp_path / 'client') as queue:
+        raw = stage(queue, source, 'pending')
+        with queue.db:
+            queue.db.execute("UPDATE pending SET state='rejected'")
+        chunks = ChunkStore(queue.root)
+        recipe = chunks.path('recipes', raw['digest'])
+        fd, name = tempfile.mkstemp(dir=recipe.parent, prefix='.chunk-')
+        os.close(fd)
+        from pathlib import Path
+        temporary = Path(name)
+        if problem == 'symlink':
+            temporary.unlink()
+            temporary.symlink_to(source)
+        elif problem == 'permissions':
+            temporary.chmod(0o644)
+        elif problem == 'unknown_name':
+            (recipe.parent / '.unknown').touch()
+        else:
+            recipe.unlink()
+        assert queue.flush(Receiver())['chunk_cleanup']['status'] == 'deferred'
+        assert temporary.exists()
+        assert source.read_bytes() == b'pending original'
 
 
 def test_acknowledgement_keeps_shared_pending_chunks_then_reclaims_all(tmp_path):

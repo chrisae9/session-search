@@ -147,6 +147,11 @@ corruption, or unexpected storage paths defer cleanup. This applies only to clie
 transfer copies, never native sessions or server archives. Local archival chunks
 remain retained; automatic archival retention is not implemented.
 
+Flush also reclaims private chunk-write temporary files left by a crashed client,
+after validating pending recipes and acquiring both capture and flush locks.
+Unknown filenames, symlinks, unexpected permissions, or missing pending data defer
+cleanup. The cleanup result reports these separately as `removed_temporaries`.
+
 For a space-constrained search standby, `snapshot DESTINATION --search-only` keeps all normalized revisions, citations, and search indexes while excluding raw objects and their recovery references. The snapshot declares its purpose as `search-replica`; recovery backup commands reject it. Use the default complete snapshot for raw-file recovery and offload verification.
 
 Activation retires obsolete generations while retaining the current and previous snapshots and any older snapshot held by an active reader. Reader pins use operating-system locks and are released if the reader crashes. `prune-replica` repeats this cleanup after readers finish. It only removes managed replica generations; canonical evidence in the current catalog, source snapshots, and backup repositories remain intact.
