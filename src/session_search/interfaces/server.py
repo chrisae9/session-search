@@ -101,6 +101,22 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                                     request_id=data["request_id"], raw=data.get("raw"))
             return {"version": 1, "status": "durable", **result}
 
+    @app.post("/v1/migration-heads")
+    def migration_heads(data: dict):
+        if readonly:
+            raise HTTPException(409, "migration checkpoints must come from the primary")
+        sessions = data.get("sessions")
+        if (set(data) != {"sessions"} or not isinstance(sessions, list)
+                or not 1 <= len(sessions) <= 100
+                or not all(isinstance(s, str) and 0 < len(s) <= 256 for s in sessions)):
+            raise HTTPException(400, "migration lookup requires 1–100 session identities")
+        placeholders = ",".join("?" for _ in sessions)
+        with read() as catalog:
+            rows = catalog.db.execute("SELECT h.session_id,h.revision,r.source,r.parser_version "
+                "FROM heads h JOIN revisions r ON r.session_id=h.session_id AND r.revision=h.revision "
+                f"WHERE h.session_id IN ({placeholders})", sessions).fetchall()
+        return {"version": 1, "heads": {r["session_id"]: dict(r) for r in rows}}
+
     @app.get("/v1/objects/{key}")
     def raw_status(key: str, request: Request):
         if readonly:

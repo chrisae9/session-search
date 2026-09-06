@@ -107,6 +107,17 @@ class Client:
                                  {"digest": key, "size": len(encoded)})
         return self._request(self.primary, "/v1/revisions", payload)
 
+    def migration_heads(self, sessions: list[str]) -> dict:
+        result = self._request(self.primary, "/v1/migration-heads", {"sessions": sessions})
+        heads = result.get("heads")
+        if not isinstance(heads, dict) or set(heads) - set(sessions):
+            raise RemoteError(502)
+        for sid, value in heads.items():
+            if (not isinstance(value, dict) or value.get("session_id") != sid
+                    or not isinstance(value.get("revision"), str) or len(value["revision"]) != 64):
+                raise RemoteError(502)
+        return heads
+
     def upload_raw(self, path: Path, digest: str) -> dict:
         return self._upload_object(path, digest, "/v1/objects/")
 

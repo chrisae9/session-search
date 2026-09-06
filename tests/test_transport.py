@@ -65,6 +65,8 @@ def test_standby_never_accepts_upload(setup):
                        headers=HEADERS, content=b"x").status_code == 409
     assert standby.post("/v1/revision-objects", headers=HEADERS,
                         json={"digest": key, "size": 1}).status_code == 409
+    assert standby.post("/v1/migration-heads", headers=HEADERS,
+                        json={"sessions": ["s1"]}).status_code == 409
 
 
 def test_large_revision_limit_and_busy_admission_return_retryable_status(setup):

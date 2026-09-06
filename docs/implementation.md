@@ -20,6 +20,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
 - [x] Verified legacy archive importer and immutable historical turn/event locator aliases.
+- [x] Explicit first-upload checkpoint adoption for legacy imports, with concurrent-update conflict protection.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
 - [ ] Offline installation, quality/performance evaluations, and migration.
@@ -29,6 +30,6 @@ Existing production storage remains separate. Offload tests use synthetic files 
 
 Background indexers share a lock on the authoritative catalog; standby catalogs cannot index. Query embeddings bypass this background lock. This bounds Session Search background ingestion across primary worker processes, but does not control unrelated applications sharing the model endpoint. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 
-Parser regression fixtures cover the extracted Codex behavior. [Legacy migration](migration.md) tests cover historical locator preservation after subsequent capture, tombstones, and conflicting or corrupt archives. Whole-corpus retrieval parity and client checkpoint reconciliation still need migration/evaluation tests. Do not infer those guarantees from the current unit tests.
+Parser regression fixtures cover the extracted Codex behavior. [Legacy migration](migration.md) tests cover historical locator preservation after subsequent capture, tombstones, conflicting or corrupt archives, and first-upload checkpoint adoption. Whole-corpus retrieval parity and general recovery of lost client checkpoints still need migration/evaluation tests. Do not infer those guarantees from the current unit tests.
 
 The development catalog is schema version 2. The earlier prototype schema is deliberately rejected rather than silently modified; no production Session Search catalog has been migrated. Snapshot verification checks canonical revision digests in addition to database and raw-object integrity.

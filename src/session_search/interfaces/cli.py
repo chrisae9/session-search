@@ -65,6 +65,8 @@ def parser() -> argparse.ArgumentParser:
     embed.add_argument("--limit", type=int, default=100)
     flush = commands.add_parser("flush", help="send queued revisions to the primary")
     flush.add_argument("--limit", type=int, default=100)
+    flush.add_argument("--bootstrap-imports", action="store_true",
+                       help="adopt exact legacy import heads before the first native upload")
     serve = commands.add_parser("serve", help="serve HTTP on loopback behind a TLS proxy")
     serve.add_argument("--credentials", type=Path, required=True)
     serve.add_argument("--port", type=int, default=8765)
@@ -195,7 +197,7 @@ def main(argv=None) -> int:
             if not client:
                 raise ValueError("flush requires remote mode")
             with UploadQueue(args.data_dir) as queue:
-                output = queue.flush(client, limit=args.limit)
+                output = queue.flush(client, limit=args.limit, bootstrap_imports=args.bootstrap_imports)
             print(canonical_json(output))
             return 0
         if client:

@@ -1,6 +1,7 @@
 """Durable outbound work, separate from the full search catalog."""
 
 import json
+import fcntl
 import sqlite3
 import time
 from dataclasses import asdict
@@ -50,6 +51,7 @@ class UploadQueue:
 
     def ingest(self, session: SessionRevision, *, producer: str, request_id: str,
                checkpoint: tuple[str, str] | None = None, raw: dict | None = None) -> dict:
+        revision = session.revision
         with self.db:
             previous = self.db.execute(
                 "SELECT revision FROM pending WHERE session_id=? ORDER BY seq DESC LIMIT 1",
@@ -63,11 +65,11 @@ class UploadQueue:
                                       "session": asdict(session), **({"raw": raw} if raw else {})})
             existing = self.db.execute("SELECT revision FROM pending WHERE request_id=?",
                                        (request_id,)).fetchone()
-            if existing and existing[0] != session.revision:
+            if existing and existing[0] != revision:
                 raise ValueError("idempotency key reused for different content")
             self.db.execute(
                 "INSERT OR IGNORE INTO pending(request_id,session_id,revision,payload) VALUES (?,?,?,?)",
-                (request_id, session.session_id, session.revision, payload),
+                (request_id, session.session_id, revision, payload),
             )
             if checkpoint:
                 self.db.execute("INSERT INTO captured VALUES (?,?) ON CONFLICT(path) "
@@ -76,7 +78,7 @@ class UploadQueue:
                 self.db.execute("INSERT INTO raw_captures VALUES (?,?,?) ON CONFLICT(path) "
                                 "DO UPDATE SET fingerprint=excluded.fingerprint,digest=excluded.digest",
                                 (raw["path"], raw["fingerprint"], raw["digest"]))
-        return {"session_id": session.session_id, "revision": session.revision,
+        return {"session_id": session.session_id, "revision": revision,
                 "duplicate": bool(existing), "upload": "queued"}
 
     def status(self) -> dict:
@@ -88,22 +90,61 @@ class UploadQueue:
         return self.db.execute("SELECT 1 FROM raw_captures WHERE path=? AND fingerprint=?",
                                (path, fingerprint)).fetchone() is not None
 
-    def flush(self, client: Client, *, limit: int = 100, now: float | None = None) -> dict:
+    def flush(self, client: Client, *, limit: int = 100, now: float | None = None,
+              bootstrap_imports: bool = False) -> dict:
         if not 1 <= limit <= 1000:
             raise ValueError("flush limit must be between 1 and 1000")
+        with (self.root / ".flush.lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return {"version": 1, "status": "coalesced", "sent": 0, "failed": 0,
+                        "queue": self.status()}
+            bootstrapped = self._bootstrap_imports(client, limit) if bootstrap_imports else 0
+            result = self._flush(client, limit=limit, now=now)
+            result["bootstrapped"] = bootstrapped
+            return result
+
+    def _bootstrap_imports(self, client: Client, limit: int) -> int:
+        rows = self.db.execute("SELECT p.seq,p.session_id FROM pending p "
+            "WHERE p.state IN ('pending','conflict') "
+            "AND json_extract(p.payload,'$.expected_revision') IS NULL "
+            "AND json_extract(p.payload,'$.session.source')='codex' "
+            "AND NOT EXISTS(SELECT 1 FROM pending older WHERE older.session_id=p.session_id "
+            "AND older.seq<p.seq) ORDER BY p.seq LIMIT ?", (limit,)).fetchall()
+        updated = 0
+        for start in range(0, len(rows), 100):
+            batch = rows[start:start + 100]
+            heads = client.migration_heads([r['session_id'] for r in batch])
+            with self.db:
+                for row in batch:
+                    head = heads.get(row['session_id'], {})
+                    if head.get('source') != 'codex' or head.get('parser_version') != 'legacy-archive-v1':
+                        continue
+                    # The server still compares this exact revision at commit.
+                    # Another client's intervening update therefore stays a conflict.
+                    self.db.execute("UPDATE pending SET payload=json_set(payload,'$.expected_revision',?),"
+                        "state='pending',next_attempt=0 WHERE seq=?",
+                        (head['revision'], row['seq']))
+                    updated += 1
+        return updated
+
+    def _flush(self, client: Client, *, limit: int, now: float | None) -> dict:
         now = time.time() if now is None else now
         sent = 0
         failed = 0
         # Only the oldest outstanding revision per session can be sent. A conflict
         # blocks that session; unrelated histories can continue to progress.
         rows = self.db.execute(
-            "SELECT p.* FROM pending p WHERE p.state='pending' AND p.next_attempt<=? AND "
+            "SELECT p.seq,p.revision,p.session_id,p.attempts FROM pending p "
+            "WHERE p.state='pending' AND p.next_attempt<=? AND "
             "NOT EXISTS(SELECT 1 FROM pending older WHERE older.session_id=p.session_id "
             "AND older.seq<p.seq) ORDER BY p.seq LIMIT ?", (now, limit),
         ).fetchall()
         for row in rows:
             try:
-                payload = json.loads(row["payload"])
+                serialized = self.db.execute("SELECT payload FROM pending WHERE seq=?", (row['seq'],)).fetchone()
+                payload = json.loads(serialized[0])
                 if payload.get("raw"):
                     from session_search.storage.objects import ObjectStore
                     raw = payload["raw"]
