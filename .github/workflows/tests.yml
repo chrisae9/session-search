@@ -29,3 +29,9 @@ jobs:
         run: uv run --no-sync python benchmarks/evaluate_retrieval.py --data-dir "$RUNNER_TEMP/session-search-benchmark" --output "$RUNNER_TEMP/session-search-benchmark.json"
       - name: Verify offline core wheel installation
         run: python tests/check_offline_wheel.py dist
+      - name: Prepare pinned MCP dependency wheels
+        run: |
+          uv export --locked --no-dev --extra mcp --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/mcp-requirements.txt"
+          python -m pip download --only-binary=:all: --require-hashes -r "$RUNNER_TEMP/mcp-requirements.txt" --dest "$RUNNER_TEMP/mcp-wheelhouse"
+      - name: Verify offline MCP installation and stdio operation
+        run: python tests/check_offline_mcp.py dist "$RUNNER_TEMP/mcp-wheelhouse"

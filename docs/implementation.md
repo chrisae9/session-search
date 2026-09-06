@@ -24,6 +24,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
+- [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
@@ -34,7 +35,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Raw-prefix checkpoint reconciliation and forced recapture after client loss or an older primary restore.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
-- [ ] Offline installation with MCP/local inference extras, quality/performance evaluations, and migration.
+- [ ] Offline local-inference installation, quality/performance evaluations, and migration.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [ ] Provenance clearance, GitHub publication, and deployment.
 

@@ -85,9 +85,29 @@ Run `embed --limit 100` with the same data directory and embedding configuration
 
 Run `session-search --data-dir CLIENT_DATA compact-client` after draining the upload queue to reclaim unused SQLite payload pages. It preserves acknowledgements and capture checkpoints, and defers while capture or flush is busy, any pending/conflicted/rejected work remains, or scratch space is insufficient. It affects only the local upload queue; search catalogs and native session files are untouched.
 
-## Offline core verification
+## Offline installation verification
 
-The core wheel has no third-party dependencies. After building it, run `python tests/check_offline_wheel.py dist` to install it into a clean environment with package-manager networking disabled. The installed CLI scenario also blocks Python socket operations and external processes, and runs without optional packages. It covers capture, search, immutable context, missing-model fallback, and snapshots. This checks the core distribution; offline MCP and local inference bundles require their optional dependencies and model artifacts separately.
+The core wheel has no third-party dependencies. After building it, run `python tests/check_offline_wheel.py dist` to install it into a clean environment with package-manager networking disabled. The installed CLI scenario also blocks Python socket operations and external processes, and runs without optional packages. It covers capture, search, immutable context, missing-model fallback, and snapshots. For MCP, prepare dependency wheels on a connected computer matching the target
+operating system, architecture, and Python version:
+
+```sh
+BUNDLE_DIR=/absolute/path/offline-bundle
+mkdir -p "$BUNDLE_DIR"
+uv export --locked --no-dev --extra mcp --no-emit-project \
+  --format requirements-txt --output-file "$BUNDLE_DIR/mcp-requirements.txt"
+python -m pip download --only-binary=:all: --require-hashes \
+  -r "$BUNDLE_DIR/mcp-requirements.txt" --dest "$BUNDLE_DIR/wheels"
+python tests/check_offline_mcp.py dist "$BUNDLE_DIR/wheels"
+```
+
+Keep these generated requirements and wheels outside the source checkout. The
+MCP verifier installs from the prepared wheels with index access and package cache
+disabled, then exercises actual stdio search, immutable context, and status while
+blocking Internet sockets, DNS, connections, and child commands in the server.
+It also verifies keyword fallback when a local model is absent. Python and `uv`
+must already be installed. This qualifies local keyword MCP operation; local
+inference still requires separately provisioned model artifacts and native runtime
+qualification. CI repeats core and MCP checks on its supported platform matrix.
 
 ## Recovery development
 
