@@ -113,6 +113,14 @@ qualification. CI repeats core and MCP checks on its supported platform matrix.
 
 `snapshot DESTINATION` uses SQLite's backup API and includes referenced raw objects. `verify-snapshot SNAPSHOT` verifies the database checksum, database references, and every raw object. `activate-replica SNAPSHOT` stages and verifies a copy before switching the replica's current generation.
 
+The storage layer can also verify shared-chunk raw evidence. Snapshots containing
+such evidence use manifest version 2 with `raw_storage: files-and-chunks-v1`;
+older snapshot verifiers reject that version. Whole-file snapshots retain version 1, and
+current code reads both. Raw-file identities remain hashes of the complete
+original bytes. Backup and replacement-primary preparation preserve shared chunks
+and verify every reconstructed file. Capture and upload integration is unfinished,
+so this format is not yet the live archival default.
+
 For a space-constrained search standby, `snapshot DESTINATION --search-only` keeps all normalized revisions, citations, and search indexes while excluding raw objects and their recovery references. The snapshot declares its purpose as `search-replica`; recovery backup commands reject it. Use the default complete snapshot for raw-file recovery and offload verification.
 
 Activation retires obsolete generations while retaining the current and previous snapshots and any older snapshot held by an active reader. Reader pins use operating-system locks and are released if the reader crashes. `prune-replica` repeats this cleanup after readers finish. It only removes managed replica generations; canonical evidence in the current catalog, source snapshots, and backup repositories remain intact.

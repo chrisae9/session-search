@@ -173,7 +173,7 @@ class Catalog:
         if raw:
             from session_search.storage.objects import ObjectStore
             objects = ObjectStore(self.root)
-            if not objects.verify(raw["digest"]) or objects.path(raw["digest"]).stat().st_size != raw["size"]:
+            if not objects.verify(raw["digest"]) or objects.size(raw["digest"]) != raw["size"]:
                 raise ValueError("raw evidence must be durable and verified before acknowledgement")
         with self.db:
             prior = self.db.execute(

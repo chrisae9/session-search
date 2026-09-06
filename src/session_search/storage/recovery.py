@@ -43,9 +43,7 @@ def prepare_primary(snapshot: Path, destination: Path, *, expected_snapshot: str
             shutil.copyfile(snapshot / 'manifest.json', stage / 'manifest.json')
             source_objects, target_objects = ObjectStore(snapshot), ObjectStore(stage)
             for item in manifest['raw_objects']:
-                target = target_objects.path(item['digest'])
-                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                shutil.copyfile(source_objects.path(item['digest']), target)
+                source_objects.copy_to(target_objects, item['digest'], allow_links=False)
             copied = verify_snapshot(stage)
             if copied['snapshot'] != expected_snapshot:
                 raise ValueError('recovery snapshot changed while preparing primary')

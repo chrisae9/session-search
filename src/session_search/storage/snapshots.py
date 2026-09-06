@@ -47,29 +47,19 @@ def create_snapshot(catalog: Catalog, destination: Path, *, search_only: bool = 
             os.fsync(f.fileno())
         source_objects = ObjectStore(catalog.root)
         target_objects = ObjectStore(stage)
+        contains_chunks = False
         for key, size in objects:
-            if not source_objects.verify(key):
-                raise ValueError("snapshot references missing or corrupt raw evidence")
-            source = source_objects.path(key)
-            dest = target_objects.path(key)
-            dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            # Immutable objects may be linked locally. Cross-device copies are
-            # streamed by copyfile and verified before the snapshot is published.
-            try:
-                os.link(source, dest)
-            except OSError:
-                shutil.copyfile(source, dest)
-                dest.chmod(0o600)
-            with dest.open("rb") as f:
-                os.fsync(f.fileno())
-            sync_directory(dest.parent)
-            if dest.stat().st_size != size:
+            contains_chunks = contains_chunks or source_objects.layout(key) == "chunks-v1"
+            source_objects.copy_to(target_objects, key)
+            if target_objects.size(key) != size:
                 raise ValueError("raw object size mismatch")
-        manifest = {"version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
+        manifest = {"version": 2 if contains_chunks else 1, "created_at": datetime.now(timezone.utc).isoformat(),
                     "purpose": "search-replica" if search_only else "recovery",
                     "publication": publication,
                     "catalog_sha256": file_digest(stage / "catalog.sqlite3"),
                     "raw_objects": [{"digest": key, "size": size} for key, size in objects]}
+        if contains_chunks:
+            manifest["raw_storage"] = "files-and-chunks-v1"
         content = canonical_json(manifest)
         with (stage / "manifest.json").open("w") as f:
             f.write(content)
@@ -92,8 +82,10 @@ def verify_snapshot(path: Path) -> dict:
     if manifest_path.is_symlink() or (path / "catalog.sqlite3").is_symlink():
         raise ValueError("snapshot files must not be symlinks")
     manifest = json.loads(manifest_path.read_text())
-    if manifest.get("version") != 1:
+    if manifest.get("version") not in {1, 2}:
         raise ValueError("unsupported snapshot version")
+    if manifest["version"] == 2 and manifest.get("raw_storage") != "files-and-chunks-v1":
+        raise ValueError("unsupported snapshot raw storage")
     purpose = manifest.get("purpose", "recovery")
     if purpose not in {"recovery", "search-replica"}:
         raise ValueError("unsupported snapshot purpose")
@@ -117,7 +109,9 @@ def verify_snapshot(path: Path) -> dict:
             raise ValueError("snapshot object manifest is incomplete")
         objects = ObjectStore(path)
         for item in expected:
-            if not objects.verify(item["digest"]) or objects.path(item["digest"]).stat().st_size != item["size"]:
+            if manifest["version"] == 1 and objects.layout(item["digest"]) != "file":
+                raise ValueError("chunked raw evidence requires snapshot version 2")
+            if not objects.verify(item["digest"]) or objects.size(item["digest"]) != item["size"]:
                 raise ValueError("snapshot raw evidence is missing or corrupt")
         coverage = catalog.status()
         if manifest.get("publication") != catalog.publication():
