@@ -1,6 +1,7 @@
 """Three read-only agent tools, using the same local or remote operations."""
 
 import os
+import asyncio
 from dataclasses import asdict
 from pathlib import Path
 
@@ -14,9 +15,31 @@ from session_search.storage.catalog import Catalog
 
 
 def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> FastMCP:
+    from session_search.core.embeddings import LocalEmbedder
+    if isinstance(provider, LocalEmbedder):
+        from session_search.core.local_worker import IsolatedLocalEmbedder
+        provider = IsolatedLocalEmbedder(provider)
     server = FastMCP("session-search")
     annotations = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
                                   idempotentHint=True, openWorldHint=client is not None)
+
+    capacity = asyncio.BoundedSemaphore(8)
+
+    async def dispatch(function, *args):
+        try:
+            await asyncio.wait_for(capacity.acquire(), timeout=0.1)
+        except TimeoutError:
+            return {"version": 1, "status": "unavailable", "reason": "mcp_busy"}
+        task = asyncio.create_task(asyncio.to_thread(function, *args))
+
+        def completed(finished):
+            capacity.release()
+            if not finished.cancelled():
+                finished.exception()  # Retrieve failures even after caller cancellation.
+
+        task.add_done_callback(completed)
+        # A cancelled caller must not release capacity while its thread still runs.
+        return await asyncio.shield(task)
 
     def invoke(operation, payload):
         if client:
@@ -31,7 +54,7 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
             return {"version": 1, "status": "ok", "coverage": catalog.status()}
 
     @server.tool(annotations=annotations, structured_output=False)
-    def search(text: str, literal: bool = False, role: str | None = None,
+    async def search(text: str, literal: bool = False, role: str | None = None,
                after: str | None = None, before: str | None = None,
                project: str | None = None, session_id: str | None = None,
                producer: str | None = None, include_subagents: bool = False,
@@ -43,16 +66,15 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
             exclude.append(os.environ["CODEX_THREAD_ID"])
         query = SearchQuery(text, literal, role, after, before, project, session_id, producer,
                             tuple(exclude), include_subagents, limit)
-        return canonical_json(bounded_response(invoke("search", asdict(query)), budget))
+        return canonical_json(bounded_response(await dispatch(invoke, "search", asdict(query)), budget))
 
     @server.tool(annotations=annotations, structured_output=False)
-    def context(citations: list[dict], neighbors: int = 2, budget: int = 32768) -> str:
+    async def context(citations: list[dict], neighbors: int = 2, budget: int = 32768) -> str:
         """Expand exact cited revisions. Unavailable evidence is never replaced by a newer revision."""
-        return canonical_json(bounded_response(invoke("context", {
+        return canonical_json(bounded_response(await dispatch(invoke, "context", {
             "citations": citations, "neighbors": neighbors}), budget))
 
-    @server.tool(annotations=annotations, structured_output=False)
-    def status() -> str:
+    def status_result() -> dict:
         """Report search coverage and availability; replication and backup are separate states."""
         from session_search.interfaces.capture_status import capture_status
         result = invoke("status", None)
@@ -66,6 +88,11 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
                 result["pending_uploads"] = db.execute("SELECT COUNT(*) FROM pending").fetchone()[0]
             finally:
                 db.close()
-        return canonical_json(bounded_response(result))
+        return result
+
+    @server.tool(annotations=annotations, structured_output=False)
+    async def status() -> str:
+        """Report coverage, local capture freshness, and pending uploads."""
+        return canonical_json(bounded_response(await dispatch(status_result)))
 
     return server

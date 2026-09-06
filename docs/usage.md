@@ -213,10 +213,28 @@ MCP server with an unloaded model, then checks first-query and warm semantic
 retrieval, a concurrent literal query, context, and status. Fresh process does not
 mean a cold filesystem or Metal shader cache.
 
-The qualified pilot measured 0.67 seconds for the first semantic request and 0.04
-seconds warm. The concurrent literal request took 0.62 seconds. Current synchronous
-MCP dispatch blocks the event loop during model startup, so this is functional
-offline qualification, not a guarantee of independent interactive response times.
-Native initialization also temporarily redirects process output in the upstream
-runtime. Model isolation and bounded dispatch remain required before claiming that
-slow native inference cannot delay or interfere with other MCP operations.
+The original synchronous pilot measured 0.67 seconds for the first semantic request,
+0.04 seconds warm, and 0.62 seconds for a concurrent literal request. With native
+model isolation and asynchronous dispatch, a repeat measured roughly 0.75 seconds,
+0.04 seconds, and 0.004 seconds respectively. These small synthetic measurements
+establish that model startup no longer occupies the MCP event loop; they are not
+whole-corpus latency guarantees.
+
+MCP runs local native inference in one spawned child process, isolating the
+runtime's process-wide output changes from the stdio transport. There is at most
+one outstanding model request. The parent waits up to two seconds for inference;
+busy or timed-out calls fall back to keyword retrieval while the existing request
+finishes. A later matching request may reuse its completed result. If an outstanding
+request is still unfinished after 60 seconds, the next call terminates the worker
+before retry can start a replacement. Worker shutdown also terminates the child.
+This is checked on calls, not an independent watchdog.
+
+MCP dispatch admits at most eight operations, waiting up to 100 ms for a slot before
+reporting `mcp_busy`. Cancelling a caller does not free that slot until its underlying
+thread completes. This bounds dispatch work; it does not forcibly interrupt SQLite
+queries or remote requests. Native-process startup and IPC add overhead beyond the
+inference wait itself. Other frontends' local embedding calls remain in-process.
+
+Add `--short-timeout` to the native MCP check to force keyword fallback with a
+1 ms inference wait, then verify that the same worker completes and semantic
+retrieval recovers. This exercises fallback without a duplicate model process.

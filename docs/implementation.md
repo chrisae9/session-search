@@ -50,7 +50,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Pilot historical import with legacy citation resolution checks.
 - [x] Apple Silicon macOS 26 native-inference bundle installation and semantic engine check with OS networking denied.
 - [x] Fresh-process local semantic MCP, concurrent literal query, context, and status with OS networking denied.
-- [ ] Native model isolation and bounded MCP dispatch; synchronous model startup currently delays other tools.
+- [x] Isolated native MCP model process, single-request inference admission, and cancellation-aware bounded MCP dispatch.
 - [ ] Additional native-runtime platforms and whole-corpus quality/performance qualification.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
