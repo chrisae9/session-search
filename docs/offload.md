@@ -20,7 +20,7 @@ session-search --data-dir <client-data> --primary <primary-https> --token-file <
   apply-client-offload <plan.json> --plan-id <reviewed-digest>
 ```
 
-Apply holds the capture and upload locks, submits a fresh random nonce to the primary, and waits up to two hours for exact backup verification. `--verification-timeout` can shorten that wait. It never uses standby verification or a saved proof from another attempt. Primary errors, interrupted verification, invalid proofs, or restarted Codex writers stop application.
+Apply holds the capture and upload locks, submits a fresh random nonce to the primary, and waits up to two hours for exact backup verification. `--verification-timeout` can shorten that wait. It never uses standby verification or a saved proof from another attempt. Brief transport failures retry the same nonce and job, avoiding duplicate restores when a submission reply is lost. Three consecutive transport failures, authentication errors, interrupted verification, invalid proofs, or restarted Codex writers stop application. Retries and busy admission remain within the original timeout; a late success does not extend it.
 
 Each file's acknowledgement, age, identity, full digest, and trailing newline are checked again after verification. Writer and proof-expiry checks run again after hashing and before removal. Changed files are skipped. An interrupted apply can leave some reviewed files removed and others retained; inspect the result and make a new plan for the remainder. Backup verification reports are not reusable offline deletion permits.
 

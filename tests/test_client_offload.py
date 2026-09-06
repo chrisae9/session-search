@@ -212,3 +212,57 @@ def test_acknowledgement_recovery_cannot_rebase_heads_and_can_page_past_unresolv
         assert queue.db.execute('SELECT revision FROM acknowledged').fetchone()[0] == original_head
         assert offload.recover_raw_acknowledgements(queue, Lookup(), cursor=result['next_cursor'])['scanned'] == 0
         assert source.exists()
+
+
+def test_lost_submit_reply_and_transient_poll_retry_same_nonce_and_job(monkeypatch):
+    from session_search.interfaces.client import RemoteError
+    monkeypatch.setattr(offload, 'writers_running', lambda: False)
+    monkeypatch.setattr(offload.time, 'sleep', lambda _: None)
+    class Flaky(ProofClient):
+        submissions = []
+        polls = []
+        def request_offload_verification(self, nonce, requirements):
+            self.submissions.append(nonce)
+            result = super().request_offload_verification(nonce, requirements)
+            if len(self.submissions) == 1:
+                raise RemoteError(None)  # Server accepted the job; its reply was lost.
+            return {**result, 'status': 'running'}
+        def poll_offload_verification(self, job_id):
+            self.polls.append(job_id)
+            if len(self.polls) == 1:
+                raise RemoteError(502)
+            return super().poll_offload_verification(job_id)
+    client = Flaky()
+    response = offload.fresh_proof(client, [{'synthetic': True}], timeout=10)
+    assert response['status'] == 'restore_verified'
+    assert len(client.submissions) == 2 and len(set(client.submissions)) == 1
+    assert client.polls == ['a' * 64, 'a' * 64]
+
+
+@pytest.mark.parametrize('status,attempts', [(401, 1), (403, 1), (404, 1), (503, 3), (None, 3)])
+def test_verification_retries_are_bounded_and_auth_failures_stop(monkeypatch, status, attempts):
+    from session_search.interfaces.client import RemoteError
+    monkeypatch.setattr(offload, 'writers_running', lambda: False)
+    monkeypatch.setattr(offload.time, 'sleep', lambda _: None)
+    calls = []
+    class Unavailable:
+        def request_offload_verification(self, nonce, requirements):
+            calls.append(nonce)
+            raise RemoteError(status)
+    with pytest.raises(RemoteError):
+        offload.fresh_proof(Unavailable(), [], timeout=10)
+    assert len(calls) == attempts
+    assert len(set(calls)) == 1
+
+
+def test_late_success_does_not_extend_verification_deadline(monkeypatch):
+    monkeypatch.setattr(offload, 'writers_running', lambda: False)
+    now = [0.0]
+    monkeypatch.setattr(offload.time, 'monotonic', lambda: now[0])
+    class Late(ProofClient):
+        def poll_offload_verification(self, job_id):
+            result = super().poll_offload_verification(job_id)
+            now[0] = 11
+            return result
+    with pytest.raises(TimeoutError):
+        offload.fresh_proof(Late(), [], timeout=10)

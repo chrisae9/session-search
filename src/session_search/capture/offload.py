@@ -11,6 +11,7 @@ from pathlib import Path
 
 from session_search.capture.local import fingerprint
 from session_search.core.records import canonical_json, digest
+from session_search.interfaces.client import RemoteError
 from session_search.storage.objects import sync_directory
 from session_search.storage.offload import writers_running
 
@@ -89,15 +90,31 @@ def fresh_proof(client, requirements, *, timeout: float):
         raise ValueError('verification timeout must be within two hours')
     nonce = secrets.token_hex(32)
     start = time.monotonic()
-    response = client.request_offload_verification(nonce, requirements)
-    job_id = response.get('job_id')
-    if (response.get('status') != 'queued' or response.get('nonce') != nonce
-            or not isinstance(job_id, str) or not re.fullmatch('[0-9a-f]{64}', job_id)):
-        raise RuntimeError('fresh verification could not be started')
+    job_id = None
+    failures = 0
     while time.monotonic() - start < timeout:
         if writers_running():
             raise RuntimeError('Codex restarted; offload stopped')
-        response = client.poll_offload_verification(job_id)
+        submitting = job_id is None
+        try:
+            response = (client.request_offload_verification(nonce, requirements) if submitting
+                        else client.poll_offload_verification(job_id))
+            failures = 0
+        except RemoteError as exc:
+            failures += 1
+            if exc.status not in {None, 429, 500, 502, 503, 504} or failures >= 3:
+                raise
+            time.sleep(min(2 ** (failures - 1), max(0, timeout - (time.monotonic() - start))))
+            continue
+        if time.monotonic() - start >= timeout:
+            break
+        if submitting:
+            if response.get('status') == 'busy':
+                time.sleep(min(1, max(0, timeout - (time.monotonic() - start))))
+                continue
+            job_id = response.get('job_id')
+            if not isinstance(job_id, str) or not re.fullmatch('[0-9a-f]{64}', job_id):
+                raise RuntimeError('fresh verification could not be started')
         if response.get('job_id') != job_id or response.get('nonce') != nonce:
             raise ValueError('verification response does not match this request')
         if response.get('status') == 'restore_verified':
@@ -130,6 +147,8 @@ def fresh_proof(client, requirements, *, timeout: float):
             return {**response, 'expires_at': min(expires, now + 900)}
         if response.get('status') not in {'queued', 'running'}:
             raise RuntimeError('fresh backup verification did not succeed')
+        if submitting:
+            continue
         time.sleep(min(1, max(0, timeout - (time.monotonic() - start))))
     raise TimeoutError('backup verification did not finish within the requested time')
 
