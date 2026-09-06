@@ -11,7 +11,7 @@ These commands operate on an isolated development store. They do not migrate the
 .venv/bin/session-search --data-dir demo-state/local status
 ```
 
-Capture defaults to the configured Codex home; `--codex-home` selects a different source. It reads completed JSONL records, preserves a partial tail for a later scan, and never deletes history when a source file disappears. Changed files are currently reparsed; unchanged files are skipped.
+Capture defaults to the configured Codex home; `--codex-home` selects a different source. It reads completed JSONL records, preserves a partial tail for a later scan, and never deletes history when a source file disappears. Ownership metadata and response records are scanned in separate passes so ignored raw payloads do not accumulate in memory. Changed files are still reparsed; unchanged files are skipped.
 
 Pass the returned citation objects unchanged to `context` as a JSON array. Search excludes the active Codex thread tree when `CODEX_THREAD_ID` is available. `--literal` bypasses embeddings; role, project, session, producer, and time filters remain strict.
 

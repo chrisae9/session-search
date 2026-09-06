@@ -4,6 +4,7 @@ This checklist records delivered behavior, separately from the target architectu
 
 - [x] Standalone Python package and optional dependency groups.
 - [x] Codex parser extraction with existing regression fixtures.
+- [x] Streaming ownership scan and response parsing without retaining ignored raw payloads.
 - [x] Transactional canonical revisions and lexical retrieval.
 - [x] Shared immutable evidence records and compressed revision maps; unchanged text is not copied for each growing revision.
 - [x] Immutable bounded context and CLI.

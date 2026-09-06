@@ -486,39 +486,24 @@ class CodexParser(BaseParser):
         session_metadata = []
         trigger_line = None
         task_starts = []
-        raw_entries = []
+        boundary_line = 0
         source_path = str(jsonl_path.expanduser().resolve())
 
-        with open(jsonl_path) as f:
-            for line_number, line in enumerate(f, start=1):
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                if obj.get("type") == "session_meta":
-                    session_metadata.append((line_number, obj.get("payload", {})))
-                    continue
-
-                if (
-                    obj.get("type") == "inter_agent_communication_metadata"
-                    and obj.get("payload", {}).get("trigger_turn")
-                    and trigger_line is None
-                ):
-                    trigger_line = line_number
-                    continue
-
-                if (
-                    obj.get("type") == "event_msg"
-                    and obj.get("payload", {}).get("type") == "task_started"
-                ):
-                    task_starts.append((
-                        line_number, obj.get("payload", {}).get("turn_id")
-                    ))
-                    continue
-
-                if obj.get("type") == "response_item":
-                    raw_entries.append((line_number, obj))
+        # Ownership metadata can appear after replayed parent history. Scan it
+        # first without retaining response payloads (including embedded images).
+        metadata_keys = ("id", "session_id", "cwd", "source", "thread_source",
+                         "parent_thread_id", "forked_from_id", "agent_path", "agent_nickname")
+        for line_number, obj in _iter_json_records(jsonl_path):
+            if obj.get("type") == "session_meta":
+                payload = obj.get("payload", {})
+                session_metadata.append((line_number, {key: payload[key] for key in metadata_keys if key in payload}))
+            elif (obj.get("type") == "inter_agent_communication_metadata"
+                    and obj.get("payload", {}).get("trigger_turn") and trigger_line is None):
+                trigger_line = line_number
+            elif (obj.get("type") == "event_msg"
+                    and obj.get("payload", {}).get("type") == "task_started"):
+                task_starts.append((line_number, obj.get("payload", {}).get("turn_id")))
+        obj = None  # Release the final decoded response before the second pass.
 
         matching_metadata = next((
             payload for _line_number, payload in session_metadata
@@ -594,15 +579,13 @@ class CodexParser(BaseParser):
                     if trigger_line > last_foreign_line:
                         boundary_line = trigger_line
                 authoritative_empty = boundary_line is None
-                raw_entries = [
-                    entry for entry in raw_entries
-                    if boundary_line is not None and entry[0] > boundary_line
-                ]
 
         turns = []
         current_turn = None
 
-        for line_number, obj in raw_entries:
+        for line_number, obj in _iter_json_records(jsonl_path, after_line=boundary_line):
+            if obj.get("type") != "response_item":
+                continue
             timestamp = obj.get("timestamp", "")
             payload = obj.get("payload", {})
             ptype = payload.get("type")
@@ -837,6 +820,22 @@ def _dedupe(values):
             seen.add(value)
             result.append(value)
     return result
+
+
+def _iter_json_records(path, *, after_line=0):
+    """Yield one decoded record at a time, preserving original line citations."""
+    if after_line is None:
+        return
+    with open(path) as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if line_number <= after_line:
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                yield line_number, value
 
 
 def _read_session_cwd(jsonl_path):
