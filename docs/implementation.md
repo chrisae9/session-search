@@ -27,6 +27,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
+- [ ] Integrate the tested fixed-chunk raw store with capture, transfer, snapshots, and recovery; current live archives still use whole files.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Upload completion publishes the verified staging inode without allocating a second full raw or normalized file.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
