@@ -141,7 +141,9 @@ the existing model deadline and returned explicit keyword fallback; subsequent
 semantic retrieval, context, and status passed with networking denied. This is
 fallback/recovery evidence, not a guarantee of semantic results on the first cold
 query. The Linux wheel was built on its test host and has not been qualified as a
-portable manylinux distribution. Keep source hashes, build settings, compiler
+portable manylinux distribution. Its bundled libraries reference GLIBC 2.43 and
+OpenSSL 3.3 symbols; that wheel must not be assumed compatible with older system
+libraries. Provision a native build for the target system. Keep source hashes, build settings, compiler
 records, and dependency notices with locally built native wheels.
 
 ## Recovery development
