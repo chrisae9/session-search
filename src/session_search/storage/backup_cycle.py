@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -175,12 +176,13 @@ def backup_cycle(source: Path, outbox: Path, repositories, *, reserve_bytes=2 * 
 
 def cycle_status(root: Path, publication: str | None):
     path = root / "backup-cycle-status.json"
-    if not path.exists():
-        return "not_configured"
     try:
-        if path.is_symlink():
-            raise ValueError("invalid status")
-        with path.open() as stream:
+        # Validate the opened inode, not a prior pathname observation. Nonblocking
+        # open also prevents a replaced FIFO from hanging agent status requests.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("invalid status")
             text = stream.read(8193)
         if len(text) > 8192:
             raise ValueError("oversized status")
@@ -197,5 +199,7 @@ def cycle_status(root: Path, publication: str | None):
             result[name] = value[name]
         result["matches_current"] = bool(publication and value.get("publication") == publication)
         return result
+    except FileNotFoundError:
+        return "not_configured"
     except (OSError, ValueError, KeyError, TypeError):
         return {"status": "unavailable"}

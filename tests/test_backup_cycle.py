@@ -1,6 +1,8 @@
 import fcntl
 import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -166,6 +168,42 @@ def test_backup_status_rejects_corrupt_or_unbounded_metadata(tmp_path):
     for text in ("{}", "x" * 8193, "null"):
         path.write_text(text)
         assert cycle_status(tmp_path, None) == {"status": "unavailable"}
+
+
+@pytest.mark.parametrize("kind", ["fifo", "directory", "symlink", "dangling", "replaced"])
+def test_backup_status_special_files_cannot_block_agent_status(tmp_path, kind):
+    # Run in a killable process so a regression to blocking FIFO reads cannot
+    # hang the test runner. Replacement exercises the open/fstat boundary.
+    code = '''
+import json, os, sys
+from pathlib import Path
+from session_search.storage.backup_cycle import cycle_status
+root = Path(sys.argv[1])
+kind = sys.argv[2]
+path = root / "backup-cycle-status.json"
+if kind == "fifo":
+    os.mkfifo(path)
+elif kind == "directory":
+    path.mkdir()
+elif kind in {"symlink", "dangling"}:
+    target = root / "target"
+    if kind == "symlink":
+        target.write_text("{}")
+    path.symlink_to(target)
+else:
+    path.write_text("{}")
+    original = os.open
+    def replace_before_open(name, flags, *args, **kwargs):
+        if Path(name) == path:
+            path.unlink()
+            os.mkfifo(path)
+        return original(name, flags, *args, **kwargs)
+    os.open = replace_before_open
+print(json.dumps(cycle_status(root, None)))
+'''
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), kind],
+                            capture_output=True, text=True, timeout=5, check=True)
+    assert json.loads(result.stdout) == {"status": "unavailable"}
 
 
 def test_duplicate_repository_identity_never_completes_policy(tmp_path, monkeypatch):
