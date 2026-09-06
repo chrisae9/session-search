@@ -110,6 +110,8 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--producer", required=True, help="stable identity of this installation")
     capture.add_argument("--archive-raw", action="store_true",
                          help="explicitly retain exact raw session files in this local catalog")
+    capture.add_argument("--chunk-raw", action="store_true",
+                         help="local-only: share raw chunks; requires --archive-raw")
     capture.add_argument("--force", action="store_true",
                          help="explicit recovery: recapture files even when checkpoints match")
     search = commands.add_parser("search", help="retrieve cited evidence")
@@ -292,7 +294,7 @@ def main(argv=None) -> int:
                 output = {"version": 1, "status": "ok", "coverage": catalog.status()}
             elif args.command == "capture":
                 output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw,
-                                      force=args.force)
+                                      force=args.force, chunk_raw=args.chunk_raw)
             elif args.command == "search":
                 exclude = list(args.exclude_session)
                 current = os.environ.get("CODEX_THREAD_ID")
@@ -331,7 +333,7 @@ def remote_command(args, client: Client) -> dict:
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
             result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw,
-                                  force=args.force)
+                                  force=args.force, chunk_raw=args.chunk_raw)
             result["queue"] = queue.status()
             return result
     if args.command == "init":

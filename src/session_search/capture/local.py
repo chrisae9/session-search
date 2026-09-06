@@ -83,16 +83,25 @@ def normalize_session(parsed) -> SessionRevision:
     )
 
 
+def _validate_raw_options(catalog, archive_raw: bool, chunk_raw: bool) -> None:
+    if chunk_raw and not archive_raw:
+        raise ValueError("chunked raw capture requires archive_raw")
+    if chunk_raw and not isinstance(catalog, Catalog):
+        raise ValueError("chunked raw capture requires local-only mode; use serve --chunk-raw remotely")
+
+
 def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
-                 force: bool = False) -> dict:
+                 force: bool = False, chunk_raw: bool = False) -> dict:
+    _validate_raw_options(catalog, archive_raw, chunk_raw)
     # A lightweight client's staging copy must survive until its queue record is
     # committed, even when another process finishes uploading the same object.
     with getattr(catalog, "capture_guard", nullcontext)():
-        return _capture_file(catalog, path, producer, archive_raw=archive_raw, force=force)
+        return _capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
+                             chunk_raw=chunk_raw)
 
 
 def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
-                  force: bool = False) -> dict:
+                  force: bool = False, chunk_raw: bool = False) -> dict:
     path = path.resolve()
     before = fingerprint(path)
     if not force and catalog.fingerprint(str(path)) == before:
@@ -114,7 +123,7 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
         raw = None
         if archive_raw:
             from session_search.storage.objects import ObjectStore
-            raw = {**ObjectStore(catalog.root).put(path), "path": str(path), "fingerprint": before}
+            raw = {**ObjectStore(catalog.root).put(path, chunked=chunk_raw), "path": str(path), "fingerprint": before}
             if fingerprint(path) != before:
                 return {"status": "changed_during_read", "retryable": True}
         receipt = catalog.ingest(
@@ -127,7 +136,8 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
 
 
 def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bool = False,
-                 force: bool = False) -> dict:
+                 force: bool = False, chunk_raw: bool = False) -> dict:
+    _validate_raw_options(catalog, archive_raw, chunk_raw)
     home = home.resolve()
     files = {}
     accessible_roots = 0
@@ -141,7 +151,8 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
     counts: dict[str, int] = {}
     for path in sorted(files.values()):
         try:
-            result = capture_file(catalog, path, producer, archive_raw=archive_raw, force=force)
+            result = capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
+                                  chunk_raw=chunk_raw)
             label = result["status"]
             counts[label] = counts.get(label, 0) + 1
         except (OSError, ValueError) as exc:

@@ -112,3 +112,48 @@ def test_staging_source_change_does_not_advance_checkpoint(tmp_path, monkeypatch
         assert capture_file(catalog, path, 'device')['status'] == 'changed_during_read'
         assert catalog.fingerprint(str(path)) is None
         assert catalog.status()['sessions'] == 0
+
+
+def test_local_chunk_capture_preserves_raw_tail_and_snapshot(tmp_path):
+    import hashlib
+    from session_search.storage.chunks import ChunkStore
+    from session_search.storage.snapshots import create_snapshot, verify_snapshot
+
+    home = tmp_path / "codex"
+    (home / "sessions").mkdir(parents=True)
+    path = home / "sessions" / "example.jsonl"
+    original = (rollout("chunk recovery evidence") + '{"unfinished":').encode()
+    path.write_bytes(original)
+    key = hashlib.sha256(original).hexdigest()
+    root = tmp_path / "catalog"
+    with Catalog(root) as catalog:
+        result = capture_home(catalog, home, "device", archive_raw=True, chunk_raw=True)
+        assert result["counts"] == {"captured": 1}
+        citation = catalog.search(SearchQuery("recovery"))["results"][0]["citation"]
+        assert capture_file(catalog, path, "device", archive_raw=True,
+                            chunk_raw=True)["status"] == "unchanged"
+        assert capture_file(catalog, path, "device", archive_raw=True,
+                            chunk_raw=True, force=True)["status"] == "captured"
+        snapshot = tmp_path / "snapshot"
+        create_snapshot(catalog, snapshot)
+    assert verify_snapshot(snapshot)
+    assert json.loads((snapshot / "manifest.json").read_text())["version"] == 2
+    path.unlink()
+    restored = tmp_path / "restored.jsonl"
+    ChunkStore(snapshot).restore(key, restored)
+    assert restored.read_bytes() == original
+    with Catalog(snapshot, readonly=True) as catalog:
+        assert catalog.context([citation])["results"][0]["events"][0]["text"] == "chunk recovery evidence"
+
+
+def test_chunk_capture_rejects_invalid_modes_even_without_sessions(tmp_path):
+    import pytest
+    from session_search.capture.queue import UploadQueue
+
+    with Catalog(tmp_path / "catalog") as catalog:
+        with pytest.raises(ValueError, match="requires archive_raw"):
+            capture_home(catalog, tmp_path / "absent", "device", chunk_raw=True)
+    with UploadQueue(tmp_path / "queue") as queue:
+        with pytest.raises(ValueError, match="local-only"):
+            capture_home(queue, tmp_path / "absent", "device", archive_raw=True, chunk_raw=True)
+        assert not list((queue.root / "objects").glob("**/recipes/*/*"))

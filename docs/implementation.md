@@ -29,7 +29,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Chunk-backed catalog acknowledgement, version 2 snapshots, dual Restic restoration, and replacement-primary preparation.
 - [x] Opt-in server raw-upload chunking with the existing client protocol, shared-prefix reuse, and publication retry recovery.
-- [ ] Integrate shared chunks with local-only capture and client staging; deploy and verify against live archives.
+- [x] Opt-in local-only capture into shared raw chunks.
+- [ ] Integrate shared chunks with client staging; deploy and verify against live archives.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Upload completion publishes the verified staging inode without allocating a second full raw or normalized file.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
