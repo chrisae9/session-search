@@ -110,6 +110,8 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--credentials", type=Path, required=True)
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--readonly", action="store_true")
+    serve.add_argument("--search-workers", type=int, default=4,
+                       help="maximum concurrent server searches (1–64; default 4)")
     serve.add_argument("--chunk-raw", action="store_true", help="archive new raw uploads as shared chunks")
     serve.add_argument("--offload-repositories", type=Path, help="explicit backup policy for offload verification")
     serve.add_argument("--offload-receipt", type=Path, help="server-owned dual recovery receipt")
@@ -314,6 +316,7 @@ def main(argv=None) -> int:
                 pass
             uvicorn.run(create_app(args.data_dir, args.credentials, readonly=args.readonly,
                                    provider=provider, chunk_raw=args.chunk_raw,
+                                   search_workers=args.search_workers,
                                    offload_repositories=args.offload_repositories,
                                    offload_receipt=args.offload_receipt),
                         host="127.0.0.1", port=args.port, access_log=False)

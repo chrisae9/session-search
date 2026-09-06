@@ -6,6 +6,8 @@ import fcntl
 import hashlib
 import hmac
 import json
+import asyncio
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,8 +19,38 @@ from session_search.core.records import Event, SearchQuery, SessionRevision
 from session_search.storage.catalog import Catalog
 from session_search.storage.fencing import WriteFenced
 
+
+class SearchBusy(Exception):
+    pass
+
+
+class SearchPool:
+    """Bound running searches, including work whose caller has disconnected."""
+
+    def __init__(self, workers: int):
+        if type(workers) is not int or not 1 <= workers <= 64:
+            raise ValueError('search workers must be between 1 and 64')
+        self.capacity = threading.BoundedSemaphore(workers)
+        self.tasks = set()
+
+    async def run(self, function, *args):
+        if not self.capacity.acquire(blocking=False):
+            raise SearchBusy()
+        task = asyncio.create_task(asyncio.to_thread(function, *args))
+        self.tasks.add(task)
+
+        def completed(finished):
+            self.tasks.discard(finished)
+            self.capacity.release()
+            if not finished.cancelled():
+                finished.exception()
+
+        task.add_done_callback(completed)
+        return await asyncio.shield(task)
+
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                provider=None, chunk_raw: bool = False,
+               search_workers: int = 4,
                offload_repositories: Path | None = None,
                offload_receipt: Path | None = None) -> FastAPI:
     if bool(offload_repositories) != bool(offload_receipt):
@@ -31,6 +63,7 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         verification = VerificationJobs(data_dir / 'offload-verifications',
                                         offload_repositories, offload_receipt)
     app = FastAPI(title="Session Search", docs_url=None, redoc_url=None, openapi_url=None)
+    search_pool = SearchPool(search_workers)
 
     @app.middleware("http")
     async def authenticate(request: Request, call_next):
@@ -133,12 +166,20 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
             return {"version": 1, "status": "ok", "coverage": catalog.status(),
                     "server_role": "standby" if readonly else "primary"}
 
-    @app.post("/v1/search")
-    def search(data: dict, request: Request):
+    def run_search(query, budget):
         from session_search.storage.semantic import hybrid_search
-        budget = data.pop("budget", 16384)
         with read() as catalog:
-            return bounded_response(hybrid_search(catalog, SearchQuery(**data), provider), budget)
+            return bounded_response(hybrid_search(catalog, query, provider), budget)
+
+    @app.post("/v1/search")
+    async def search(data: dict, request: Request):
+        budget = data.pop("budget", 16384)
+        query = SearchQuery(**data)
+        try:
+            return await search_pool.run(run_search, query, budget)
+        except SearchBusy:
+            return JSONResponse({'version': 1, 'status': 'unavailable', 'reason': 'search_busy'},
+                                status_code=503, headers={'Retry-After': '1'})
 
     @app.post("/v1/context")
     def context(data: dict, request: Request):

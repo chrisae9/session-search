@@ -69,6 +69,19 @@ Import into a separate Session Search store and prevent legacy publishers from w
 
 Measure Recall@10, MRR@10, query latency, peak memory, ingestion throughput, and storage reclaimed against a fixed baseline. Use synthetic fixtures for public reproduction and a private representative query set for personal relevance. Report measured tradeoffs before changing embedding models or adding retrieval features.
 
+## Server search admission
+
+`serve --search-workers COUNT` limits concurrent search tasks to four by default
+(valid range: 1–64). Excess searches receive HTTP 503 with `search_busy` and
+`Retry-After: 1`; configured clients can fail over to their read-only standby.
+There is no additional search wait queue. Status and context do not use these
+slots. The limit applies separately to each server process, not across hosts.
+
+Cancelling a caller does not release its slot while the worker still runs.
+Search threads finish normally; this is an admission bound, not a whole-query
+deadline or cancellation of SQLite or model work. It does not guarantee latency
+or reserve CPU, disk bandwidth, or memory against unrelated workloads.
+
 ## Replica capacity
 
 `replicate` checks local space before creating a pending search snapshot and asks

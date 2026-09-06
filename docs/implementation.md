@@ -23,6 +23,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Two-minute pilot embedding contention check: 120 foreground queries and 809 background requests completed without failures.
 - [x] New embedding work selects chunks referenced by current session revisions, retaining older evidence and citations.
 - [x] Three read-only MCP tools and authenticated HTTP transport.
+- [x] Configurable server search admission with retryable overload and capacity retained after caller cancellation until worker completion.
 - [x] Monotonic SSH credential propagation, exact acknowledgements, and independent retry timer templates.
 - [x] Verified snapshot creation and atomic read-only replica activation.
 - [x] Replica retention of current, previous, and actively pinned generations, including reader crash recovery.
