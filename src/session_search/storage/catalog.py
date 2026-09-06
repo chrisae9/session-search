@@ -71,6 +71,13 @@ CREATE TABLE IF NOT EXISTS legacy_citations (
  PRIMARY KEY(locator,session_id,revision,event_id),
  FOREIGN KEY(session_id,revision) REFERENCES revisions(session_id,revision)
 );
+CREATE TABLE IF NOT EXISTS project_aliases (
+ session_id TEXT NOT NULL, project TEXT NOT NULL, alias TEXT NOT NULL,
+ legacy_revision TEXT NOT NULL, native_revision TEXT NOT NULL,
+ PRIMARY KEY(session_id,project,alias),
+ FOREIGN KEY(session_id,legacy_revision) REFERENCES revisions(session_id,revision),
+ FOREIGN KEY(session_id,native_revision) REFERENCES revisions(session_id,revision)
+);
 PRAGMA user_version = 2;
 """
 
@@ -155,6 +162,9 @@ class Catalog:
         elif version != 2:
             self.close()
             raise ValueError("uninitialized catalog")
+        self.has_project_aliases = bool(self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_aliases'"
+        ).fetchone())
 
     def close(self):
         if hasattr(self, "db"):
@@ -198,6 +208,11 @@ class Catalog:
                 (session.session_id, revision),
             ).fetchone()
             if not exists:
+                previous_head = self.db.execute(
+                    "SELECT r.revision,r.source,r.project,r.parser_version "
+                    "FROM revisions r JOIN heads h USING(session_id,revision) "
+                    "WHERE r.session_id=?", (session.session_id,),
+                ).fetchone()
                 previous_rows = {row[0] for row in self.db.execute(
                     "SELECT event_row FROM active_events WHERE session_id=?", (session.session_id,)
                 )}
@@ -234,6 +249,18 @@ class Catalog:
                     "INSERT INTO heads VALUES (?,?) ON CONFLICT(session_id) "
                     "DO UPDATE SET revision=excluded.revision", (session.session_id, revision),
                 )
+                # Legacy imports label projects with slugs; native capture uses
+                # paths. Bind the migration label to this exact native project.
+                if (previous_head and previous_head["source"] == session.source == "codex"
+                        and previous_head["parser_version"] == "legacy-archive-v1"
+                        and session.parser_version != "legacy-archive-v1"
+                        and previous_head["project"] and session.project
+                        and previous_head["project"] != session.project):
+                    self.db.execute(
+                        "INSERT OR IGNORE INTO project_aliases VALUES (?,?,?,?,?)",
+                        (session.session_id, session.project, previous_head["project"],
+                         previous_head["revision"], revision),
+                    )
             self.db.execute("INSERT OR IGNORE INTO producers VALUES (?,?,?)",
                             (session.session_id, revision, producer))
             self.db.execute("INSERT INTO receipts VALUES (?,?,?,?)",
@@ -277,9 +304,19 @@ class Catalog:
             args.append(query.role)
             if query.role == "user":
                 conditions.append("e.origin='user'")
+        if query.project:
+            project_condition = "instr(lower(r.project),lower(?))>0"
+            args.append(query.project)
+            if self.has_project_aliases:
+                project_condition += (
+                    " OR EXISTS(SELECT 1 FROM project_aliases pa WHERE "
+                    "pa.session_id=r.session_id AND pa.project=r.project "
+                    "AND instr(lower(pa.alias),lower(?))>0)"
+                )
+                args.append(query.project)
+            conditions.append("(" + project_condition + ")")
         for value, condition in [
             (query.after, "e.timestamp>=?"), (query.before, "e.timestamp<?"),
-            (query.project, "instr(lower(r.project),lower(?))>0"),
             (query.session_id, "e.session_id=?"),
         ]:
             if value:

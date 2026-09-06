@@ -13,7 +13,7 @@ from session_search.storage.catalog import Catalog
 def setup(tmp_path):
     root = tmp_path / 'primary'
     legacy = SessionRevision('s', (Event('old', 'user', 'original insight'),),
-                             parser_version='legacy-archive-v1')
+                             project='legacy-project', parser_version='legacy-archive-v1')
     with Catalog(root) as catalog:
         catalog.ingest(legacy, producer='legacy', request_id='import')
         cite = catalog.search(SearchQuery('insight'))['results'][0]['citation']
@@ -34,8 +34,10 @@ def setup(tmp_path):
 
 def test_explicit_bootstrap_preserves_imported_citation_and_queue_order(tmp_path):
     root, client, cite = setup(tmp_path)
-    first = SessionRevision('s', (Event('new', 'user', 'native continuation'),))
-    second = SessionRevision('s', (*first.events, Event('later', 'assistant', 'later evidence')))
+    first = SessionRevision('s', (Event('new', 'user', 'native continuation'),),
+                            project='/workspace/native-project')
+    second = SessionRevision('s', (*first.events, Event('later', 'assistant', 'later evidence')),
+                             project=first.project)
     with UploadQueue(tmp_path / 'queue') as queue:
         queue.ingest(first, producer='d', request_id='first')
         queue.ingest(second, producer='d', request_id='second')
@@ -45,6 +47,7 @@ def test_explicit_bootstrap_preserves_imported_citation_and_queue_order(tmp_path
         assert queue.flush(client, bootstrap_imports=True)['sent'] == 1
     with Catalog(root, readonly=True) as catalog:
         assert catalog.context([cite])['results'][0]['events'][0]['text'] == 'original insight'
+        assert catalog.search(SearchQuery('continuation', project='legacy-project'))['results']
         assert catalog.db.execute('SELECT revision FROM heads WHERE session_id=?', ('s',)).fetchone()[0] == second.revision
 
 

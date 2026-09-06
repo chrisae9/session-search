@@ -98,6 +98,15 @@ def verify_snapshot(path: Path) -> dict:
             raise ValueError("snapshot database integrity check failed")
         if catalog.db.execute("PRAGMA foreign_key_check").fetchone():
             raise ValueError("snapshot database reference check failed")
+        if catalog.has_project_aliases and catalog.db.execute(
+            "SELECT 1 FROM project_aliases a "
+            "JOIN revisions l ON l.session_id=a.session_id AND l.revision=a.legacy_revision "
+            "JOIN revisions n ON n.session_id=a.session_id AND n.revision=a.native_revision "
+            "WHERE l.source!='codex' OR n.source!='codex' "
+            "OR l.parser_version!='legacy-archive-v1' OR n.parser_version='legacy-archive-v1' "
+            "OR a.alias='' OR a.project='' OR a.alias!=l.project OR a.project!=n.project LIMIT 1"
+        ).fetchone():
+            raise ValueError("snapshot project alias provenance mismatch")
         for row in catalog.db.execute("SELECT session_id,revision FROM revisions"):
             value = catalog.export_revision(row["session_id"], row["revision"])
             value["events"] = tuple(Event(**event) for event in value["events"])

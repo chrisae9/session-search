@@ -29,6 +29,14 @@ This imports normalized search evidence, not raw session files or existing embed
 
 After a client captures its native Codex files into its durable queue, `flush --bootstrap-imports` can adopt matching legacy import heads from the primary. This explicit migration option only changes a first upload's expected revision when the primary still identifies that session as a legacy Codex import. The server checks that exact revision again when committing. Existing native heads and intervening updates remain conflicts; the option never forces an overwrite. Later queued revisions retain their original ordering, and imported citations continue to address their original evidence.
 
+When a native capture replaces a Codex import, its imported project slug remains
+a search alias for that session's native project path. Both names work with
+keyword and hybrid project filters. The alias follows later revisions at the same
+path, but does not match a different project path or another session. Old revision
+identities remain unchanged, and verified snapshots retain the alias mapping.
+Deploy an alias-aware server before the first native upload; this does not
+retroactively infer aliases for imports already replaced by older versions.
+
 ## Recovering client checkpoints
 
 For native Codex sessions with raw archival enabled, `flush --reconcile-raw-prefixes` can repair an oldest queued revision's expected server revision. It obtains bounded metadata directly from the primary and hashes the corresponding prefix of the client's staged raw file. Reconciliation proceeds only when the server session is absent, or its archived raw bytes are an exact prefix of the client file. The final upload still compares the exact server revision at commit, preserving conflicts with intervening writers. Later queued revisions keep their ordering.
