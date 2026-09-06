@@ -48,7 +48,8 @@ def append(source, text):
                 {'type': 'output_text', 'text': text}]}}) + '\n')
 
 
-def test_lost_client_checkpoints_recover_proven_append_and_preserve_queue_order(tmp_path):
+@pytest.mark.parametrize("chunk_staging", [False, True])
+def test_lost_client_checkpoints_recover_proven_append_and_preserve_queue_order(tmp_path, chunk_staging):
     root, client, source, _ = setup(tmp_path)
     with UploadQueue(tmp_path / 'lost-client') as queue:
         capture_file(queue, source, 'd', archive_raw=True)
@@ -58,8 +59,16 @@ def test_lost_client_checkpoints_recover_proven_append_and_preserve_queue_order(
     with UploadQueue(tmp_path / 'replacement-client') as queue:
         append(source, 'second insight')
         capture_file(queue, source, 'd', archive_raw=True)
+        if chunk_staging:
+            from session_search.storage.objects import ObjectStore
+            raw = ObjectStore(queue.root).put(source, chunked=True)
+            ObjectStore(queue.root).path(raw['digest']).unlink()
         append(source, 'third insight')
         capture_file(queue, source, 'd', archive_raw=True)
+        if chunk_staging:
+            from session_search.storage.objects import ObjectStore
+            raw = ObjectStore(queue.root).put(source, chunked=True)
+            ObjectStore(queue.root).path(raw['digest']).unlink()
         assert queue.flush(client)['failed'] == 1
         recovered = queue.flush(client, reconcile_raw_prefixes=True)
         assert recovered['reconciled'] == 1 and recovered['sent'] == 1

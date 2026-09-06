@@ -36,7 +36,8 @@ def test_corrupt_upload_is_not_published(tmp_path):
 
 
 @pytest.mark.parametrize("chunk_raw", [False, True])
-def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_path, chunk_raw):
+@pytest.mark.parametrize("chunk_staging", [False, True])
+def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_path, chunk_raw, chunk_staging):
     server_root = tmp_path / "server"
     with Catalog(server_root):
         pass
@@ -61,6 +62,11 @@ def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_
     with UploadQueue(tmp_path / "client") as queue:
         capture_file(queue, source, "device", archive_raw=True)
         assert queue.status()["pending"] == 1
+        if chunk_staging:
+            # Exercise the storage reader independently of the capture flag,
+            # which remains disabled until shared staging cleanup is available.
+            raw = ObjectStore(queue.root).put(source, chunked=True)
+            ObjectStore(queue.root).path(raw['digest']).unlink()
         assert queue.flush(client)["sent"] == 1
     with Catalog(server_root, readonly=True) as catalog:
         row = catalog.db.execute("SELECT digest FROM raw_sources").fetchone()

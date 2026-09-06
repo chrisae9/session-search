@@ -177,14 +177,11 @@ class UploadQueue:
                 hasher = hashlib.sha256()
                 remaining = previous['size']
                 try:
-                    with ObjectStore(self.root).path(raw['digest']).open('rb') as source:
-                        while remaining:
-                            chunk = source.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                break
-                            hasher.update(chunk)
-                            remaining -= len(chunk)
-                except OSError:
+                    for chunk in ObjectStore(self.root).iter_bytes(raw['digest']):
+                        prefix = chunk[:remaining]
+                        hasher.update(prefix)
+                        remaining -= len(prefix)
+                except (OSError, ValueError):
                     continue  # Retain the conflict if staging cannot prove ancestry.
                 if remaining or hasher.hexdigest() != previous['digest']:
                     continue
@@ -239,7 +236,11 @@ class UploadQueue:
                 if payload.get("raw"):
                     from session_search.storage.objects import ObjectStore
                     raw = payload["raw"]
-                    client.upload_raw(ObjectStore(self.root).path(raw["digest"]), raw["digest"])
+                    objects = ObjectStore(self.root)
+                    if objects.layout(raw["digest"]) == "chunks-v1":
+                        client.upload_raw_store(objects, raw["digest"])
+                    else:
+                        client.upload_raw(objects.path(raw["digest"]), raw["digest"])
                 receipt = client.upload(payload)
                 if receipt.get("status") != "durable" or receipt.get("revision") != row["revision"]:
                     raise RemoteError(502)

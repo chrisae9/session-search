@@ -61,6 +61,20 @@ class ObjectStore:
                 return "chunks-v1"
         raise FileNotFoundError("raw object is unavailable")
 
+    def iter_bytes(self, digest: str):
+        """Read either layout with bounded buffers and verify the complete stream."""
+        if self.layout(digest) == "chunks-v1":
+            from session_search.storage.chunks import ChunkStore
+            yield from ChunkStore(self.data_root).iter_bytes(digest)
+            return
+        hasher = hashlib.sha256()
+        with self.path(digest).open("rb") as source:
+            while content := source.read(1024 * 1024):
+                hasher.update(content)
+                yield content
+        if hasher.hexdigest() != digest:
+            raise ValueError("raw object checksum mismatch")
+
     def copy_to(self, target, digest: str, *, allow_links: bool = True):
         """Copy verified storage members, retaining shared chunks and exact recipes."""
         if self.layout(digest) == "file":

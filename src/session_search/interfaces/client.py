@@ -129,6 +129,48 @@ class Client:
     def upload_raw(self, path: Path, digest: str) -> dict:
         return self._upload_object(path, digest, "/v1/objects/")
 
+    def upload_raw_store(self, store, digest: str) -> dict:
+        """Resume either raw layout without materializing another whole file."""
+        from session_search.storage.transfers import MAX_CHUNK
+        store.path(digest)  # Validate before constructing the URL.
+        total = store.size(digest)
+        route = "/v1/objects/" + digest
+        progress = self._request(self.primary, route, None)
+        offset = progress.get("offset")
+        if type(offset) is not int or not 0 <= offset <= total:
+            raise RemoteError(502)
+        if progress.get("status") == "complete":
+            if offset != total:
+                raise RemoteError(409)
+            return progress
+        if progress.get("status") != "pending":
+            raise RemoteError(502)
+        position = 0
+        # Read the skipped prefix too: resume must not bypass local integrity
+        # validation. The server independently checks the complete-file digest.
+        for content in store.iter_bytes(digest):
+            end = position + len(content)
+            start = max(0, offset - position)
+            while start < len(content):
+                chunk = content[start:start + MAX_CHUNK]
+                progress = self._request(self.primary, f"{route}?offset={offset}&total={total}",
+                                         chunk, method="PUT")
+                expected = offset + len(chunk)
+                if (progress.get("offset") != expected
+                        or (progress.get("status") == "complete" and expected != total)):
+                    raise RemoteError(502)
+                offset = expected
+                start += len(chunk)
+            position = end
+        if position != total:
+            raise ValueError("raw object size changed during upload")
+        if progress.get("status") != "complete":
+            progress = self._request(self.primary, f"{route}?offset={offset}&total={total}",
+                                     b"", method="PUT")
+        if progress.get("status") != "complete" or progress.get("offset") != total:
+            raise RemoteError(502)
+        return progress
+
     def recovery_heads(self, sessions: list[str]) -> dict:
         import re
         result = self._request(self.primary, "/v1/recovery-heads", {"sessions": sessions})
