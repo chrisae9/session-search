@@ -93,7 +93,7 @@ Normalized payloads over 8 MiB automatically use resumable 1 MiB chunks in a sep
 
 ## Embeddings
 
-Use `--embedding-config` to select an explicitly provisioned provider. Configuration contains `mode`, an `identity` object with artifact and dimensions, and either `model_path` for local mode or `endpoint`, `model`, and `response_model` for remote mode. Remote credentials, when needed, use `token_file`.
+Use `--embedding-config` to select an explicitly provisioned provider. Configuration contains `mode`, an `identity` object with artifact and dimensions, and either `model_path` for local mode or `endpoint`, `model`, and `response_model` for remote mode. Remote credentials, when needed, use `token_file`. Remote configuration can set `timeout` (default 10 seconds) and `query_timeout` (default 2 seconds), each greater than zero and at most 60 seconds. Interactive embedding requests use the smaller allowance; background indexing retains `timeout`. These are socket I/O timeouts, not a deadline for the full database search. An embedding timeout produces explicit keyword fallback.
 
 Local artifacts require `identity.artifact` to equal `sha256:` followed by the model file's SHA-256 digest. Remote embeddings additionally require `--allow-remote-embeddings`; no remote fallback is inferred. Optional local inference dependencies must be installed beforehand.
 

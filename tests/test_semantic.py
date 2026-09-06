@@ -194,3 +194,58 @@ def test_coverage_counts_only_complete_current_events_for_selected_model(tmp_pat
                            ('different-model', provider.identity.key, key))
         catalog.db.commit()
         assert hybrid_search(catalog, SearchQuery('recovery'), provider)['coverage']['semantic_indexed'] == 2
+
+
+def test_remote_query_timeout_falls_back_without_shortening_background_requests(tmp_path):
+    import threading
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from session_search.core.embeddings import RemoteEmbedder
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            time.sleep(0.15)
+            body = json.dumps({'model': 'test', 'data': [{'embedding': [1, 0]}]}).encode()
+            try:
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        provider = RemoteEmbedder(f'http://127.0.0.1:{server.server_port}', FakeProvider.identity,
+                                  model='test', response_model='test', timeout=1, query_timeout=0.03)
+        with Catalog(tmp_path) as catalog:
+            populate(catalog)
+            # Background requests finish despite exceeding the query allowance.
+            assert index_pending(catalog, provider)['embedded'] == 2
+            start = time.monotonic()
+            result = hybrid_search(catalog, SearchQuery('recovery'), provider)
+            assert time.monotonic() - start < 0.5
+            assert result['mode'] == 'keyword' and result['degraded']
+            assert result['results'][0]['excerpt'] == 'disaster recovery'
+        assert provider.timeout == 1 and provider.query_timeout == 0.03
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_remote_timeout_configuration_is_explicit_and_validated(tmp_path):
+    config = tmp_path / 'embedding.json'
+    value = {'mode': 'remote', 'endpoint': 'http://127.0.0.1:1234',
+             'identity': {'artifact': 'test', 'dimensions': 2}, 'model': 'test', 'response_model': 'test',
+             'timeout': 0.5, 'query_timeout': 0.1}
+    config.write_text(json.dumps(value))
+    provider = load_provider(config, allow_remote=True)
+    assert provider.timeout == 0.5 and provider.query_timeout == 0.1
+    for invalid in (0, -1, 61, True, '2'):
+        config.write_text(json.dumps({**value, 'query_timeout': invalid}))
+        with pytest.raises(ValueError, match='timeouts'):
+            load_provider(config, allow_remote=True)

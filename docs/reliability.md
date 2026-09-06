@@ -18,7 +18,7 @@
 
 Track upload acknowledgement, lexical coverage, semantic coverage, replication, and backup completion separately. A healthy repository or recent backup time does not prove that a particular session revision is recoverable.
 
-Replicate every five minutes and after index publication, coalescing overlapping work. Stage and verify all referenced evidence before atomically activating a replica generation. Pin active readers; retain current and previous generations. Their retirement must not remove canonical evidence needed by old citations.
+Replicate every five minutes, coalescing overlapping work. Explicit publication pipelines may request an additional run; embedding batches do not start replication automatically. Stage and verify all referenced evidence before atomically activating a replica generation. Pin active readers; retain current and previous generations. Their retirement must not remove canonical evidence needed by old citations.
 
 Back up every six hours using a consistent database snapshot and referenced objects. Offload receipts identify the raw digest, normalized revision, and containing snapshot on each required destination. Restore and hash verification must succeed for those exact contents.
 

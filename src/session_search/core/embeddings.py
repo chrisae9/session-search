@@ -48,13 +48,18 @@ def validate_vector(vector, dimensions):
 
 class RemoteEmbedder:
     def __init__(self, endpoint: str, identity: EmbeddingIdentity, *, model: str,
-                 response_model: str, token_file: Path | None = None, timeout: float = 10):
+                 response_model: str, token_file: Path | None = None, timeout: float = 10,
+                 query_timeout: float = 2):
         self.endpoint = validate_endpoint(endpoint)
         self.identity = identity
         self.model = model
         self.response_model = response_model
         self.token_file = token_file
+        if (type(timeout) not in (int, float) or not 0 < timeout <= 60
+                or type(query_timeout) not in (int, float) or not 0 < query_timeout <= 60):
+            raise ValueError('embedding timeouts must be greater than zero and at most 60 seconds')
         self.timeout = timeout
+        self.query_timeout = min(timeout, query_timeout)
         self.opener = urllib.request.build_opener(NoRedirect())
         # Limit this worker to two background requests; foreground requests do
         # not wait on this gate. Deployment-wide scheduling remains a server concern.
@@ -72,7 +77,7 @@ class RemoteEmbedder:
         if not query:
             self.background.acquire()
         try:
-            with self.opener.open(request, timeout=self.timeout) as response:
+            with self.opener.open(request, timeout=self.query_timeout if query else self.timeout) as response:
                 body = response.read(1024 * 1024 + 1)
                 if len(body) > 1024 * 1024:
                     raise ValueError("embedding response exceeds limit")
@@ -126,5 +131,6 @@ def load_provider(config_path: Path | None, *, allow_remote: bool = False):
             config["endpoint"], identity, model=config["model"],
             response_model=config["response_model"],
             token_file=Path(config["token_file"]).expanduser() if config.get("token_file") else None,
+            timeout=config.get('timeout', 10), query_timeout=config.get('query_timeout', 2),
         )
     raise ValueError("remote embeddings require explicit network authorization")
