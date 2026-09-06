@@ -28,7 +28,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Source and standby capacity preflights defer replica work while preserving pending snapshots and the current replica.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [x] Device-scoped asynchronous verification, durable client raw acknowledgements, and reviewed thin-client offload with fresh proof and native-file rechecks.
-- [ ] Live thin-client offload qualification and legacy client acknowledgement migration.
+- [x] Producer-scoped recovery of missing client raw acknowledgements without rebasing or re-uploading files.
+- [ ] Live thin-client offload qualification.
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.

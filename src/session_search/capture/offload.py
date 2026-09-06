@@ -178,3 +178,43 @@ def apply_client_offload(queue, client, plan: dict, *, expected_plan_id: str, ti
             sync_directory(path.parent)
             removed += 1
     return {'version': 1, 'status': 'partial' if skipped else 'ok', 'removed': removed, 'skipped': skipped}
+
+
+def recover_raw_acknowledgements(queue, client, *, limit: int = 1000, cursor: str = ''):
+    """Recover only exact metadata; never rebase heads or infer backup durability."""
+    if not 1 <= limit <= 10000:
+        raise ValueError('acknowledgement recovery accepts 1–10000 sources')
+    after = bytes.fromhex(cursor).decode() if cursor else ''
+    if len(after.encode()) > 4096:
+        raise ValueError('invalid recovery cursor')
+    recovered = 0
+    with idle_queue(queue):
+        rows = [dict(row) for row in queue.db.execute(
+            'SELECT r.* FROM raw_captures r JOIN captured c '
+            'ON c.path=r.path AND c.fingerprint=r.fingerprint WHERE r.path>? '
+            'AND NOT EXISTS(SELECT 1 FROM raw_acknowledgements a WHERE a.path=r.path) '
+            'ORDER BY r.path LIMIT ?', (after, limit),
+        )]
+        for start in range(0, len(rows), 50):
+            batch = rows[start:start + 50]
+            matches = client.raw_acknowledgements(batch)
+            with queue.db:
+                for match in matches:
+                    source = batch[match['index']]
+                    # Server head lookup cannot silently replace a client's
+                    # acknowledged head or bridge an outstanding local revision.
+                    known = queue.db.execute(
+                        'SELECT 1 FROM acknowledged h JOIN raw_captures r ON r.path=? '
+                        'JOIN captured c ON c.path=r.path AND c.fingerprint=r.fingerprint '
+                        'WHERE h.session_id=? AND h.revision=? AND r.fingerprint=? AND r.digest=? '
+                        'AND NOT EXISTS(SELECT 1 FROM pending p WHERE p.session_id=h.session_id)',
+                        (source['path'], match['session_id'], match['revision'], source['fingerprint'], source['digest']),
+                    ).fetchone()
+                    if known:
+                        changed = queue.db.execute('INSERT OR IGNORE INTO raw_acknowledgements VALUES (?,?,?,?,?,?)',
+                            (source['path'], source['fingerprint'], source['digest'], match['size'],
+                             match['session_id'], match['revision'])).rowcount
+                        recovered += changed
+    return {'version': 1, 'status': 'ok', 'scanned': len(rows), 'recovered': recovered,
+            'unresolved': len(rows) - recovered,
+            'next_cursor': rows[-1]['path'].encode().hex() if len(rows) == limit else None}

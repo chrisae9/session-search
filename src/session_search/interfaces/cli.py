@@ -92,6 +92,9 @@ def parser() -> argparse.ArgumentParser:
     client_apply.add_argument('plan', type=Path)
     client_apply.add_argument('--plan-id', required=True)
     client_apply.add_argument('--verification-timeout', type=float, default=7200)
+    recover_ack = commands.add_parser('recover-client-acknowledgements', help='recover exact raw upload metadata from the primary')
+    recover_ack.add_argument('--limit', type=int, default=1000)
+    recover_ack.add_argument('--cursor', default='')
     commands.add_parser("mcp", help="serve the three read-only agent tools over stdio")
     embed = commands.add_parser("embed", help="process bounded pending semantic work")
     embed.add_argument("--limit", type=int, default=100)
@@ -180,12 +183,15 @@ def main(argv=None) -> int:
         if args.primary and not args.token_file:
             raise ValueError("remote mode requires a token file")
         client = Client(args.primary, args.token_file, standby=args.standby) if args.primary else None
-        if args.command in {'plan-client-offload', 'apply-client-offload'}:
+        if args.command in {'plan-client-offload', 'apply-client-offload', 'recover-client-acknowledgements'}:
             if client is None or not (args.data_dir / 'upload-queue.sqlite3').is_file():
                 raise ValueError('client offload requires a primary and an existing upload queue')
             from session_search.capture.offload import plan_client_offload, apply_client_offload
             with UploadQueue(args.data_dir.resolve()) as queue:
-                if args.command == 'plan-client-offload':
+                if args.command == 'recover-client-acknowledgements':
+                    from session_search.capture.offload import recover_raw_acknowledgements
+                    output = recover_raw_acknowledgements(queue, client, limit=args.limit, cursor=args.cursor)
+                elif args.command == 'plan-client-offload':
                     plan = plan_client_offload(queue, client, args.codex_home, limit=args.limit)
                     fd = os.open(args.output, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
                     with os.fdopen(fd, 'w') as output_file:

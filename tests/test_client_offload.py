@@ -151,6 +151,12 @@ def test_http_client_offload_requires_two_fresh_real_restores(tmp_path, monkeypa
     with UploadQueue(tmp_path / 'client') as queue:
         capture_file(queue, source, 'device', archive_raw=True)
         assert queue.flush(client)['sent'] == 1
+        # Simulate the old client schema's missing path-to-revision mapping.
+        queue.db.execute('DELETE FROM raw_acknowledgements')
+        queue.db.commit()
+        assert offload.plan_client_offload(queue, client, home)['missing_acknowledgements'] == 1
+        recovered = offload.recover_raw_acknowledgements(queue, client)
+        assert recovered['recovered'] == 1 and recovered['unresolved'] == 0
         with Catalog(server_root) as catalog:
             from session_search.core.records import SearchQuery
             assert catalog.search(SearchQuery('recoverable'))['results']
@@ -188,3 +194,21 @@ def test_cli_writes_private_plan_without_overwriting_reviewed_file(tmp_path, cap
     capsys.readouterr()
     assert output.read_bytes() == original
     assert source.exists()
+
+
+def test_acknowledgement_recovery_cannot_rebase_heads_and_can_page_past_unresolved(tmp_path):
+    home, source, root, raw = prepared(tmp_path)
+    class Lookup:
+        def raw_acknowledgements(self, sources):
+            return [{'index': i, 'session_id': 'example', 'revision': 'f' * 64, 'size': raw['size']}
+                    for i, item in enumerate(sources)]
+    with UploadQueue(root) as queue:
+        original_head = queue.db.execute('SELECT revision FROM acknowledged').fetchone()[0]
+        queue.db.execute('DELETE FROM raw_acknowledgements')
+        queue.db.commit()
+        result = offload.recover_raw_acknowledgements(queue, Lookup(), limit=1)
+        assert result['recovered'] == 0 and result['unresolved'] == 1
+        assert result['next_cursor']
+        assert queue.db.execute('SELECT revision FROM acknowledged').fetchone()[0] == original_head
+        assert offload.recover_raw_acknowledgements(queue, Lookup(), cursor=result['next_cursor'])['scanned'] == 0
+        assert source.exists()

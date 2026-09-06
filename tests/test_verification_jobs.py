@@ -74,6 +74,16 @@ def test_http_verification_is_explicit_primary_only_and_device_scoped(tmp_path, 
     assert not calls
     assert client.post('/v1/offload-verifications', json=payload, headers=headers).json()['status'] == 'queued'
     assert calls == [('one', payload['nonce'], [requirement])]
+    lookup = {'sources': [{k: row[k] for k in ('path', 'fingerprint', 'digest')}]}
+    assert client.post('/v1/raw-acknowledgements', json=lookup, headers=other_headers).json()['matches'] == []
+    assert client.post('/v1/raw-acknowledgements', json=lookup, headers=headers).json()['matches'] == [
+        {'index': 0, **{k: row[k] for k in ('session_id', 'revision', 'size')}}]
+    with Catalog(root) as catalog:
+        from session_search.core.records import Event, SessionRevision
+        catalog.ingest(SessionRevision('another', (Event('e', 'user', 'synthetic'),)),
+                       producer='one', request_id='ambiguous',
+                       raw={k: row[k] for k in ('path', 'fingerprint', 'digest', 'size')})
+    assert client.post('/v1/raw-acknowledgements', json=lookup, headers=headers).json()['matches'] == []
     assert source.exists()
     assert not (root / 'offload-verifications').exists()
 
@@ -90,7 +100,9 @@ def test_verification_client_never_fails_over(tmp_path, monkeypatch):
         client.request_offload_verification('a' * 64, [])
     with pytest.raises(RemoteError):
         client.poll_offload_verification('b' * 64)
-    assert calls == ['https://primary.example', 'https://primary.example']
+    with pytest.raises(RemoteError):
+        client.raw_acknowledgements([{'path': 'synthetic', 'fingerprint': 'stable', 'digest': 'c' * 64}])
+    assert calls == ['https://primary.example'] * 3
 
 
 def test_restore_keeps_admission_lock_after_worker_is_killed(tmp_path, monkeypatch):

@@ -66,6 +66,34 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
     def read():
         return Catalog(data_dir.resolve(), readonly=True)
 
+    @app.post('/v1/raw-acknowledgements')
+    def raw_acknowledgements(data: dict, request: Request):
+        if readonly:
+            raise HTTPException(409, 'raw acknowledgements come from the primary')
+        if set(data) != {'sources'} or not isinstance(data['sources'], list) or not 1 <= len(data['sources']) <= 50:
+            raise ValueError('lookup accepts 1–50 raw sources')
+        import re
+        matches = []
+        with read() as catalog:
+            for index, source in enumerate(data['sources']):
+                if not isinstance(source, dict) or set(source) != {'path', 'fingerprint', 'digest'}:
+                    raise ValueError('invalid source fields')
+                for key, maximum in (('path', 4096), ('fingerprint', 2048)):
+                    if not isinstance(source[key], str) or not 0 < len(source[key].encode()) <= maximum:
+                        raise ValueError('invalid source identity')
+                if not isinstance(source['digest'], str) or not re.fullmatch('[0-9a-f]{64}', source['digest']):
+                    raise ValueError('invalid raw digest')
+                rows = catalog.db.execute(
+                    'SELECT DISTINCT s.session_id,s.revision,s.size FROM raw_sources s '
+                    'JOIN heads h ON h.session_id=s.session_id AND h.revision=s.revision '
+                    'JOIN producers p ON p.session_id=s.session_id AND p.revision=s.revision '
+                    'WHERE s.path=? AND s.fingerprint=? AND s.digest=? AND p.producer=? LIMIT 2',
+                    (source['path'], source['fingerprint'], source['digest'], request.state.producer),
+                ).fetchall()
+                if len(rows) == 1 and len(rows[0]['session_id'].encode()) <= 512:
+                    matches.append({'index': index, **dict(rows[0])})
+        return {'version': 1, 'status': 'ok', 'matches': matches}
+
     @app.post('/v1/offload-verifications')
     def submit_verification(data: dict, request: Request):
         if readonly:

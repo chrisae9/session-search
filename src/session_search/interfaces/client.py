@@ -119,6 +119,26 @@ class Client:
         return self._request(self.primary, '/v1/offload-verifications',
                              {'nonce': nonce, 'requirements': requirements})
 
+    def raw_acknowledgements(self, sources: list[dict]) -> list[dict]:
+        import re
+        if not 1 <= len(sources) <= 50:
+            raise ValueError('lookup accepts 1–50 raw sources')
+        response = self._request(self.primary, '/v1/raw-acknowledgements', {'sources': sources})
+        matches = response.get('matches')
+        if response.get('status') != 'ok' or not isinstance(matches, list) or len(matches) > len(sources):
+            raise RemoteError(502)
+        seen = set()
+        for row in matches:
+            if (not isinstance(row, dict) or set(row) != {'index', 'session_id', 'revision', 'size'}
+                    or type(row['index']) is not int or not 0 <= row['index'] < len(sources)
+                    or row['index'] in seen or not isinstance(row['session_id'], str)
+                    or not 0 < len(row['session_id'].encode()) <= 512
+                    or not isinstance(row['revision'], str) or not re.fullmatch('[0-9a-f]{64}', row['revision'])
+                    or type(row['size']) is not int or not 0 < row['size'] <= 32 * 1024 ** 3):
+                raise RemoteError(502)
+            seen.add(row['index'])
+        return matches
+
     def poll_offload_verification(self, job_id: str) -> dict:
         import re
         if not isinstance(job_id, str) or not re.fullmatch('[0-9a-f]{64}', job_id):
