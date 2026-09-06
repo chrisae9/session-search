@@ -45,7 +45,29 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
         corrupted["candidates"][0]["path"] = "unexpected"
         with pytest.raises(ValueError, match="plan changed"):
             offload.apply_offload(corrupted, repositories, catalog=catalog, expected_plan_id=plan["plan_id"])
-        applied = offload.apply_offload(plan, repositories, catalog=catalog, expected_plan_id=plan["plan_id"])
+        from dataclasses import replace
+        from pathlib import Path
+        unavailable_scratch = [replace(r, restore_directory=tmp_path / "missing-scratch")
+                               for r in repositories]
+        with pytest.raises(FileNotFoundError):
+            offload.apply_offload(plan, unavailable_scratch, catalog=catalog,
+                                  expected_plan_id=plan["plan_id"])
+        assert source.exists()
+        restore_targets = []
+        run = ResticRepository.run
+
+        def checked_run(repository, arguments, **kwargs):
+            if arguments[0] == "restore":
+                target = Path(arguments[arguments.index("--target") + 1])
+                assert target.parent == restore_directory
+                restore_targets.append(repository.name)
+            return run(repository, arguments, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(ResticRepository, "run", checked_run)
+            applied = offload.apply_offload(plan, repositories, catalog=catalog,
+                                            expected_plan_id=plan["plan_id"])
+        assert restore_targets == ["one", "two"]
         assert applied["removed"] == 1
         assert not source.exists()
         assert catalog.status()["sessions"] == 1

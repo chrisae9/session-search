@@ -86,7 +86,8 @@ def apply_offload(plan: dict, repositories: list[ResticRepository], *, catalog: 
         actual = json.loads(repository.run(["cat", "config"]))["id"]
         if actual != receipt["repository_id"]:
             raise ValueError("backup repository identity changed")
-        with tempfile.TemporaryDirectory(prefix="session-search-offload-verify-") as root:
+        with tempfile.TemporaryDirectory(prefix="session-search-offload-verify-",
+                                         dir=repository.restore_directory) as root:
             repository.run(["restore", receipt["backup_id"], "--target", root])
             restored = Path(root) / receipt["source_path"].lstrip("/")
             from session_search.storage.snapshots import verify_snapshot
