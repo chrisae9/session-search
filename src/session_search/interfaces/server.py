@@ -18,7 +18,7 @@ from session_search.storage.catalog import Catalog
 from session_search.storage.fencing import WriteFenced
 
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
-               provider=None) -> FastAPI:
+               provider=None, chunk_raw: bool = False) -> FastAPI:
     app = FastAPI(title="Session Search", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -154,7 +154,7 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         if readonly:
             raise HTTPException(409, "raw transfer is available only on the primary")
         from session_search.storage.transfers import RawTransfers
-        return RawTransfers(data_dir).status(request.state.producer, key)
+        return RawTransfers(data_dir, chunked=chunk_raw).status(request.state.producer, key)
 
     @app.put("/v1/objects/{key}")
     async def raw_chunk(key: str, offset: int, total: int, request: Request):
@@ -164,7 +164,7 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         from session_search.storage.transfers import OffsetConflict, RawTransfers
         chunk = await request.body()
         try:
-            return await run_in_threadpool(RawTransfers(data_dir).append,
+            return await run_in_threadpool(RawTransfers(data_dir, chunked=chunk_raw).append,
                 request.state.producer, key, offset, total, chunk)
         except OffsetConflict:
             raise HTTPException(503, "transfer progress changed; retry from durable offset") from None

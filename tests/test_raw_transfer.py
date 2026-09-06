@@ -35,13 +35,14 @@ def test_corrupt_upload_is_not_published(tmp_path):
     assert not ObjectStore(tmp_path).path(key).exists()
 
 
-def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_path):
+@pytest.mark.parametrize("chunk_raw", [False, True])
+def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_path, chunk_raw):
     server_root = tmp_path / "server"
     with Catalog(server_root):
         pass
     credentials = tmp_path / "credentials.json"
     credentials.write_text(json.dumps({"device": hashlib.sha256(b"test-only").hexdigest()}))
-    http = TestClient(create_app(server_root, credentials))
+    http = TestClient(create_app(server_root, credentials, chunk_raw=chunk_raw))
     client = Client("http://127.0.0.1:1234", tmp_path / "token")
 
     def request(endpoint, route, payload, *, method=None):
@@ -63,7 +64,12 @@ def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_
         assert queue.flush(client)["sent"] == 1
     with Catalog(server_root, readonly=True) as catalog:
         row = catalog.db.execute("SELECT digest FROM raw_sources").fetchone()
-        assert ObjectStore(server_root).path(row[0]).read_bytes() == source.read_bytes()
+        if chunk_raw:
+            from session_search.storage.chunks import ChunkStore
+            assert b"".join(ChunkStore(server_root).iter_bytes(row[0])) == source.read_bytes()
+            assert ObjectStore(server_root).layout(row[0]) == "chunks-v1"
+        else:
+            assert ObjectStore(server_root).path(row[0]).read_bytes() == source.read_bytes()
 
 
 def test_full_partial_file_can_finalize_after_restart(tmp_path):
@@ -218,3 +224,45 @@ def test_retry_after_publication_crash_keeps_exact_object_and_removes_staging(tm
     assert not partial.exists()
     assert transfers.objects.path(key).stat().st_ino == inode
     assert transfers.objects.path(key).read_bytes() == data
+
+
+def test_chunk_uploads_share_appended_prefix_and_recognize_retry_without_feature_flag(tmp_path):
+    import os
+    from session_search.storage.chunks import CHUNK_SIZE, ChunkStore
+    prefix = os.urandom(CHUNK_SIZE)
+    transfers = RawTransfers(tmp_path, chunked=True)
+    keys = []
+    for tail in (b"first", b"first and appended"):
+        data = prefix + tail
+        key = hashlib.sha256(data).hexdigest()
+        keys.append(key)
+        for offset in range(0, len(data), 1024 * 1024):
+            response = transfers.append("device", key, offset, len(data), data[offset:offset+1024*1024])
+        assert response["status"] == "complete"
+        assert RawTransfers(tmp_path).status("device", key)["offset"] == len(data)
+        assert b"".join(ChunkStore(tmp_path).iter_bytes(key)) == data
+        assert not transfers.paths("device", key)[0].exists()
+    chunks = ChunkStore(tmp_path)
+    assert chunks.recipe(keys[0])["chunks"][0] == chunks.recipe(keys[1])["chunks"][0]
+    assert len(list((chunks.root / "chunks").glob("*/*"))) == 3
+
+
+def test_retry_after_chunk_recipe_publication_crash(tmp_path, monkeypatch):
+    from session_search.storage.chunks import ChunkStore
+    data = b"exact raw file"
+    key = hashlib.sha256(data).hexdigest()
+    transfers = RawTransfers(tmp_path, chunked=True)
+    put = ChunkStore.put
+
+    def publish_then_crash(store, *args, **kwargs):
+        put(store, *args, **kwargs)
+        raise RuntimeError("injected post-recipe crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ChunkStore, "put", publish_then_crash)
+        with pytest.raises(RuntimeError):
+            transfers.append("device", key, 0, len(data), data)
+    assert transfers.status("device", key)["status"] == "complete"
+    assert transfers.append("device", key, len(data), len(data), b"")["status"] == "complete"
+    assert not transfers.paths("device", key)[0].exists()
+    assert b"".join(ChunkStore(tmp_path).iter_bytes(key)) == data

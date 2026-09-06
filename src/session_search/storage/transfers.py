@@ -17,7 +17,11 @@ class OffsetConflict(ValueError):
 
 
 class RawTransfers:
-    def __init__(self, root: Path, *, namespace: str = "raw", max_size: int = 32 * 1024 ** 3):
+    def __init__(self, root: Path, *, namespace: str = "raw", max_size: int = 32 * 1024 ** 3,
+                 chunked: bool = False):
+        if chunked and namespace != "raw":
+            raise ValueError("only raw archival supports shared chunks")
+        self.chunked = chunked
         self.root = root
         self.objects = ObjectStore(root, namespace=namespace)
         self.staging = root / ("transfers" if namespace == "raw" else "revision-transfers")
@@ -29,21 +33,31 @@ class RawTransfers:
         stem = digest(producer.encode()) + "-" + key
         return self.staging / (stem + ".part"), self.staging / (stem + ".lock")
 
+    def _completed_path(self, key: str):
+        try:
+            layout = self.objects.layout(key)
+        except FileNotFoundError:
+            return None
+        if layout == "file":
+            return self.objects.path(key)
+        from session_search.storage.chunks import ChunkStore
+        return ChunkStore(self.root).path("recipes", key)
+
     def _sync_completed(self, completed: Path):
         # A reader can encounter an object linked by a different producer just
         # before that process crashes. Make publication durable before acking it.
         with completed.open("rb") as stream:
             os.fsync(stream.fileno())
         sync_directory(completed.parent)
-        sync_directory(self.objects.root)
+        sync_directory(completed.parent.parent)
 
     def status(self, producer: str, key: str) -> dict:
-        completed = self.objects.path(key)
-        if completed.exists():
+        completed = self._completed_path(key)
+        if completed is not None:
             if not self.objects.verify(key):
                 raise ValueError("completed raw object is corrupt")
             self._sync_completed(completed)
-            return {"version": 1, "status": "complete", "offset": completed.stat().st_size}
+            return {"version": 1, "status": "complete", "offset": self.objects.size(key)}
         partial, lock = self.paths(producer, key)
         with lock.open("a") as guard:
             fcntl.flock(guard, fcntl.LOCK_SH)
@@ -63,9 +77,9 @@ class RawTransfers:
         partial, lock = self.paths(producer, key)
         with lock.open("a") as guard:
             fcntl.flock(guard, fcntl.LOCK_EX)
-            completed = self.objects.path(key)
-            if completed.exists():
-                if not self.objects.verify(key) or completed.stat().st_size != total:
+            completed = self._completed_path(key)
+            if completed is not None:
+                if not self.objects.verify(key) or self.objects.size(key) != total:
                     raise ValueError("completed object does not match upload")
                 self._sync_completed(completed)
                 # A prior process may have published the object but crashed
@@ -89,6 +103,16 @@ class RawTransfers:
             with partial.open("rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != key:
                     raise ValueError("completed upload checksum mismatch")
+            if self.chunked:
+                from session_search.storage.chunks import ChunkStore
+                result = ChunkStore(self.root).put(partial, expected_digest=key)
+                if result["size"] != total:
+                    raise ValueError("raw file changed during chunk publication")
+                self._sync_completed(self._completed_path(key))
+                partial.unlink()
+                sync_directory(self.staging)
+                return {"version": 1, "status": "complete", "offset": current}
+            completed = self.objects.path(key)
             # Both paths are managed under the same data root. Publish the
             # fsynced, checksum-verified inode without allocating a second full
             # file. Exclusive link creation also handles another producer that

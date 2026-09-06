@@ -90,6 +90,7 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--credentials", type=Path, required=True)
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--readonly", action="store_true")
+    serve.add_argument("--chunk-raw", action="store_true", help="archive new raw uploads as shared chunks")
     device = commands.add_parser("device", help="add or revoke one device credential")
     device.add_argument("action", choices=["add", "revoke"])
     device.add_argument("name")
@@ -244,7 +245,7 @@ def main(argv=None) -> int:
             with Catalog(args.data_dir.resolve(), readonly=args.readonly):
                 pass
             uvicorn.run(create_app(args.data_dir, args.credentials, readonly=args.readonly,
-                                   provider=provider),
+                                   provider=provider, chunk_raw=args.chunk_raw),
                         host="127.0.0.1", port=args.port, access_log=False)
             return 0
         if args.command == "mcp":

@@ -84,3 +84,20 @@ def test_empty_file_and_invalid_recipe(tmp_path):
     assert not store.verify(result['digest'])
     with pytest.raises(ValueError):
         store.put(source, expected_digest='../invalid')
+
+
+def test_low_space_allows_verified_reuse_but_refuses_new_chunk(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from session_search.storage import chunks
+    source = tmp_path / 'raw'
+    source.write_bytes(b'existing raw file')
+    store = ChunkStore(tmp_path / 'archive')
+    first = store.put(source)
+    monkeypatch.setattr(chunks.shutil, 'disk_usage', lambda path: SimpleNamespace(free=0))
+    assert store.put(source) == first
+    source.write_bytes(b'a changed raw file')
+    new_key = hashlib.sha256(source.read_bytes()).hexdigest()
+    with pytest.raises(OSError, match='insufficient space'):
+        store.put(source)
+    assert not store.path('recipes', new_key).exists()
+    assert store.verify(first['digest'])

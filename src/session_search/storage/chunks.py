@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -45,6 +46,15 @@ class ChunkStore:
 
     def _publish(self, path: Path, content: bytes):
         _mkdir(path.parent)
+        if path.exists():
+            with path.open('rb') as stream:
+                if stream.read(len(content) + 1) != content:
+                    raise ValueError('existing chunk-store object is corrupt')
+                os.fsync(stream.fileno())
+            sync_directory(path.parent)
+            return
+        if shutil.disk_usage(path.parent).free < len(content) + 64 * 1024 * 1024:
+            raise OSError('insufficient space for a new raw chunk; existing evidence retained')
         fd, name = tempfile.mkstemp(dir=path.parent, prefix='.chunk-')
         temporary = Path(name)
         try:
