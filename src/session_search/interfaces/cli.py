@@ -30,6 +30,10 @@ def parser() -> argparse.ArgumentParser:
                         help="explicitly permit the configured remote model endpoint")
     commands = result.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="create an isolated catalog")
+    expiry = commands.add_parser('expire-transfers', help='plan or apply expiry of managed upload partials')
+    expiry.add_argument('--older-than-days', type=float, required=True)
+    expiry.add_argument('--scan-limit', type=int, default=10000)
+    expiry.add_argument('--apply', action='store_true')
     legacy = commands.add_parser("import-legacy", help="import a verified legacy archive into a new store")
     legacy.add_argument("archive", type=Path)
     legacy.add_argument("--allow-superseded-conflicts", action="store_true",
@@ -190,6 +194,13 @@ def main(argv=None) -> int:
             raise ValueError("remote mode requires a token file")
         client = Client(args.primary, args.token_file, standby=args.standby,
                         timeout=args.read_timeout) if args.primary else None
+        if args.command == 'expire-transfers':
+            if client:
+                raise ValueError('transfer expiry runs locally on the primary data host')
+            from session_search.storage.transfer_maintenance import expire_transfers
+            print(canonical_json(expire_transfers(args.data_dir, older_than_days=args.older_than_days,
+                                                  apply=args.apply, scan_limit=args.scan_limit)))
+            return 0
         if args.command in {'plan-client-offload', 'apply-client-offload', 'recover-client-acknowledgements'}:
             if client is None or not (args.data_dir / 'upload-queue.sqlite3').is_file():
                 raise ValueError('client offload requires a primary and an existing upload queue')

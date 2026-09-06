@@ -162,7 +162,8 @@ def test_full_partial_file_can_finalize_after_restart(tmp_path):
     assert result["status"] == "complete"
 
 
-def test_large_normalized_upload_recovers_lost_ack_without_raw_archival(tmp_path):
+@pytest.mark.parametrize('expire_partial', [False, True])
+def test_large_normalized_upload_recovers_lost_ack_without_raw_archival(tmp_path, expire_partial):
     from session_search.core.protocol import MAX_REQUEST
     from session_search.core.records import Event, SearchQuery, SessionRevision
     from session_search.interfaces.client import RemoteError
@@ -193,6 +194,15 @@ def test_large_normalized_upload_recovers_lost_ack_without_raw_archival(tmp_path
             raise RemoteError(response.status_code)
         if method == "PUT" and not interrupted:
             interrupted = True
+            if expire_partial:
+                import os
+                import time
+                from session_search.storage.transfer_maintenance import expire_transfers
+                key = route.split('?')[0].rsplit('/', 1)[1]
+                partial, _ = RawTransfers(root, namespace='revision-upload').paths('d', key)
+                old = time.time() - 10 * 86400
+                os.utime(partial, (old, old))
+                assert expire_transfers(root, older_than_days=7, apply=True)['removed_files'] == 1
             raise RemoteError(None)
         if route == "/v1/revision-objects" and not lost:
             lost = True
@@ -210,7 +220,7 @@ def test_large_normalized_upload_recovers_lost_ack_without_raw_archival(tmp_path
         assert queue.flush(client, now=20)["sent"] == 1
         assert queue.status()["pending"] == 0
     assert max(chunk_sizes) <= 1024 * 1024
-    assert "offset=1048576&" in chunk_routes[1]
+    assert ('offset=0&' if expire_partial else 'offset=1048576&') in chunk_routes[1]
     with Catalog(root, readonly=True) as catalog:
         assert catalog.db.execute("SELECT count(*) FROM revisions").fetchone()[0] == 1
         assert catalog.db.execute("SELECT count(*) FROM raw_sources").fetchone()[0] == 0
@@ -355,6 +365,9 @@ def test_disappearing_partial_retries_without_losing_queued_raw(
 ):
     from session_search.interfaces.client import RemoteError
     from session_search.core.records import SearchQuery
+    from session_search.storage.transfer_maintenance import expire_transfers
+    import os
+    import time
 
     root = tmp_path / 'server'
     with Catalog(root):
@@ -386,8 +399,10 @@ def test_disappearing_partial_retries_without_losing_queued_raw(
         result = response.json()
         if route == '/v1/objects/' + key and payload is None and not removed:
             assert result['offset'] == 10
-            # Synthetic loss after GET: the next PUT carries a now-stale offset.
-            partial.unlink()
+            # Expiry after GET: the next PUT carries a now-stale offset.
+            old = time.time() - 10 * 86400
+            os.utime(partial, (old, old))
+            assert expire_transfers(root, older_than_days=7, apply=True)['removed_files'] == 1
             removed = True
         return result
 
