@@ -22,8 +22,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install restic
       - run: uv sync --locked --group dev --extra server --extra mcp --extra embeddings
-      - run: uv run --no-sync ruff check src tests
+      - run: uv run --no-sync ruff check src tests benchmarks
       - run: uv run --no-sync pytest -q
       - run: uv build
+      - name: Exercise synthetic keyword evaluation
+        run: uv run --no-sync python benchmarks/evaluate_retrieval.py --data-dir "$RUNNER_TEMP/session-search-benchmark" --output "$RUNNER_TEMP/session-search-benchmark.json"
       - name: Verify offline core wheel installation
         run: python tests/check_offline_wheel.py dist

@@ -72,7 +72,11 @@ def _index_pending(catalog: Catalog, provider, *, limit: int) -> dict:
     prepare_chunks(catalog)
     identity = provider.identity.key
     rows = catalog.db.execute(
-        "SELECT c.content_hash,c.text FROM semantic_chunks c "
+        "WITH active AS (SELECT DISTINCT ec.content_hash FROM event_chunks ec "
+        "JOIN events e ON e.row_id=ec.event_row JOIN heads h "
+        "ON e.session_id=h.session_id AND e.revision=h.revision) "
+        "SELECT c.content_hash,c.text FROM active a JOIN semantic_chunks c "
+        "ON c.content_hash=a.content_hash "
         "LEFT JOIN vectors v ON v.content_hash=c.content_hash AND v.identity=? "
         "LEFT JOIN embedding_failures f ON f.content_hash=c.content_hash AND f.identity=? "
         "WHERE v.vector IS NULL AND COALESCE(f.next_attempt,0)<=? LIMIT ?",

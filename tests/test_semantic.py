@@ -103,3 +103,32 @@ def test_equal_text_deduplicates_embedding_work_without_merging_citations(tmp_pa
         assert index_pending(catalog, FakeProvider())["embedded"] == 1
         response = hybrid_search(catalog, SearchQuery("restore"), FakeProvider())
         assert {r["citation"]["session_id"] for r in response["results"]} == {"a", "b"}
+
+
+def test_background_work_skips_superseded_only_chunks_but_keeps_shared_evidence(tmp_path):
+    from session_search.storage.semantic import prepare_chunks
+
+    class Recording(FakeProvider):
+        def __init__(self):
+            self.seen = []
+
+        def embed(self, text, *, query=False):
+            self.seen.append(text)
+            return super().embed(text, query=query)
+
+    with Catalog(tmp_path) as catalog:
+        first = SessionRevision('a', (Event('old', 'user', 'superseded recovery'),
+                                      Event('shared', 'user', 'shared recovery')))
+        catalog.ingest(first, producer='d', request_id='first')
+        citation = catalog.search(SearchQuery('superseded'))['results'][0]['citation']
+        prepare_chunks(catalog)
+        catalog.ingest(SessionRevision('a', (Event('new', 'user', 'current recovery'),)),
+                       producer='d', request_id='second')
+        catalog.ingest(SessionRevision('b', (Event('shared', 'user', 'shared recovery'),)),
+                       producer='d', request_id='other')
+        provider = Recording()
+        assert index_pending(catalog, provider)['embedded'] == 2
+        assert set(provider.seen) == {'current recovery', 'shared recovery'}
+        assert index_pending(catalog, provider)['embedded'] == 0
+        assert catalog.context([citation])['results'][0]['events'][0]['text'] == 'superseded recovery'
+        assert catalog.db.execute('SELECT count(*) FROM semantic_chunks').fetchone()[0] == 3

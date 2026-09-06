@@ -1,0 +1,252 @@
+[
+  {
+    "id": "case-01",
+    "query": "Why did the service freeze after a worker died?",
+    "evidence": "The worker exited while owning an application mutex. Moving release into a finally block prevented future requests from waiting forever."
+  },
+  {
+    "id": "case-02",
+    "query": "How did we stop sending the same job twice?",
+    "evidence": "We assigned each queue operation an idempotency key and persisted its completed receipt before acknowledging delivery."
+  },
+  {
+    "id": "case-03",
+    "query": "What fixed inconsistent pages during export?",
+    "evidence": "The exporter copied a changing database file directly. Using the database backup API produced one consistent transaction snapshot."
+  },
+  {
+    "id": "case-04",
+    "query": "Why could an old link show different evidence?",
+    "evidence": "Links previously resolved to the newest revision. We changed citations to include the immutable revision hash and event identity."
+  },
+  {
+    "id": "case-05",
+    "query": "How did we prevent restored data from accepting writes?",
+    "evidence": "Recovery snapshots carry an immutable manifest, and the catalog refuses writable opens while that manifest is present."
+  },
+  {
+    "id": "case-06",
+    "query": "What was the cause of the endless login redirects?",
+    "evidence": "The proxy reported plain HTTP to an application that required HTTPS. Forwarding the original scheme stopped the authentication redirect cycle."
+  },
+  {
+    "id": "case-07",
+    "query": "How did we avoid leaking authorization to another website?",
+    "evidence": "The client disabled automatic redirects so an authenticated request could not silently move to a different origin."
+  },
+  {
+    "id": "case-08",
+    "query": "Why did the feature work in the terminal but fail overnight?",
+    "evidence": "The scheduled process inherited a minimal environment. Absolute executable paths and an explicit configuration file fixed the unattended run."
+  },
+  {
+    "id": "case-09",
+    "query": "What kept the background service alive after logout?",
+    "evidence": "The user service manager shut down when the final shell closed. Enabling user lingering kept the timer and daemon available."
+  },
+  {
+    "id": "case-10",
+    "query": "Why was the health check passing while searches failed?",
+    "evidence": "The probe only checked whether a process existed. We replaced it with an authenticated query that exercised the database and returned a known result."
+  },
+  {
+    "id": "case-11",
+    "query": "How did we reduce repeated model computation?",
+    "evidence": "Identical text fragments now share vectors keyed by content digest and model identity, while their citations remain separate."
+  },
+  {
+    "id": "case-12",
+    "query": "Why did ranking break after swapping the model?",
+    "evidence": "Old vectors were reused with a different embedding artifact. Namespacing them by artifact hash, dimensions, and preprocessing prevented incompatible reuse."
+  },
+  {
+    "id": "case-13",
+    "query": "What let new evidence remain searchable during inference outages?",
+    "evidence": "Lexical publication runs independently of vector generation. Missing embeddings reduce semantic coverage but do not delay keyword retrieval."
+  },
+  {
+    "id": "case-14",
+    "query": "How did we keep indexing from monopolizing inference?",
+    "evidence": "Background embedding workers share a process-wide admission lock for the catalog. Foreground query embeddings bypass that background gate."
+  },
+  {
+    "id": "case-15",
+    "query": "Why did the long result omit the words I searched for?",
+    "evidence": "The excerpt always began at the start of the event. Centering the excerpt and context around the match offset exposed the relevant passage."
+  },
+  {
+    "id": "case-16",
+    "query": "How did we keep a failed upload from disappearing?",
+    "evidence": "The client writes outbound revisions to a durable local queue before network delivery, and removes a payload only after an exact durable acknowledgement."
+  },
+  {
+    "id": "case-17",
+    "query": "What stopped retries from hammering an unavailable server?",
+    "evidence": "After a shared connection failure the batch stops, preserves all remaining work, and schedules a bounded exponential retry delay."
+  },
+  {
+    "id": "case-18",
+    "query": "Why was revocation undone by a late synchronization?",
+    "evidence": "A delayed credential file overwrote a newer one. Authority identities and monotonic revision numbers now reject stale updates."
+  },
+  {
+    "id": "case-19",
+    "query": "How did we handle searches when the main host was unreachable?",
+    "evidence": "Eligible read operations retry against the read-only standby. Uploads remain queued for the authoritative server."
+  },
+  {
+    "id": "case-20",
+    "query": "What prevented two servers from accepting conflicting updates?",
+    "evidence": "The deployment uses one authoritative writer and read-only replicas. Recovering a replacement requires fencing the previous writer first."
+  },
+  {
+    "id": "case-21",
+    "query": "How did we prove archived files could actually be recovered?",
+    "evidence": "We restored the completed backup into scratch storage and checked every referenced object hash against the exact snapshot manifest."
+  },
+  {
+    "id": "case-22",
+    "query": "Why was a recent backup timestamp insufficient?",
+    "evidence": "A repository can be healthy while omitting the required session revision. Recovery receipts therefore identify exact snapshot and raw-object contents."
+  },
+  {
+    "id": "case-23",
+    "query": "What protected sessions from accidental retention cleanup?",
+    "evidence": "Removal requires a reviewed plan, unchanged file identity and hash, stopped writers, and successful restores from two distinct backup repositories."
+  },
+  {
+    "id": "case-24",
+    "query": "Why did the scratch disk fill despite a small archive?",
+    "evidence": "Capacity planning used the compressed repository size. Restore verification needs room for the complete uncompressed database and raw files."
+  },
+  {
+    "id": "case-25",
+    "query": "How did we preserve an older search while publishing a new replica?",
+    "evidence": "Each reader pins its immutable generation with an operating-system lock. Cleanup retains pinned generations until their readers finish."
+  },
+  {
+    "id": "case-26",
+    "query": "What fixed runaway database space after uploads finished?",
+    "evidence": "Deleted payloads left free pages inside SQLite. Idle queue compaction reclaimed those pages while preserving checkpoints and acknowledgements."
+  },
+  {
+    "id": "case-27",
+    "query": "How did we prevent cleanup from deleting a reused transfer file?",
+    "evidence": "Capture and acknowledgement cleanup share a lock around staging reuse and queue publication, so cleanup waits until new references are committed."
+  },
+  {
+    "id": "case-28",
+    "query": "Why did a huge conversation require so much RAM to import?",
+    "evidence": "The parser retained ignored raw payloads in a list. Streaming ownership and response records avoided holding image data for the whole conversation."
+  },
+  {
+    "id": "case-29",
+    "query": "What happened to a half-written final record?",
+    "evidence": "Capture accepts only complete newline-terminated JSON records and retries an unfinished tail on the next scan."
+  },
+  {
+    "id": "case-30",
+    "query": "Why did a copied conversation include its parent messages?",
+    "evidence": "The parser had ignored the child session ownership boundary. Tracking the child identity separated inherited context from newly owned evidence."
+  },
+  {
+    "id": "case-31",
+    "query": "How did we prevent a project filter from leaking unrelated results?",
+    "evidence": "The same evidence-level predicates are applied to lexical and semantic candidate selection before ranks are merged."
+  },
+  {
+    "id": "case-32",
+    "query": "Why did the tool find the question it was currently answering?",
+    "evidence": "The current thread and its descendants were included in history retrieval. Default thread-tree exclusion removed that self-reference."
+  },
+  {
+    "id": "case-33",
+    "query": "What made an empty result different from an outage?",
+    "evidence": "The transport returns explicit unavailable status when both hosts fail. It reserves no-matches status for a completed search with zero hits."
+  },
+  {
+    "id": "case-34",
+    "query": "How did the work laptop operate without internet?",
+    "evidence": "The local core has no third-party runtime dependencies or implicit model downloads. Capture and keyword search run entirely against its own catalog."
+  },
+  {
+    "id": "case-35",
+    "query": "Why did a server change invalidate an old credential receipt?",
+    "evidence": "Acknowledgements are bound to the destination identity and exact credential revision, so a receipt from another receiver cannot establish synchronization."
+  },
+  {
+    "id": "case-36",
+    "query": "What fixed the process running twice every minute?",
+    "evidence": "An operating-system lock coalesces overlapping invocations; a second runner reports existing work instead of launching another batch."
+  },
+  {
+    "id": "case-37",
+    "query": "How did we avoid deleting history when a laptop went offline?",
+    "evidence": "Missing source directories are treated as unavailable observations, never as evidence that canonical sessions should be deleted."
+  },
+  {
+    "id": "case-38",
+    "query": "Why were identical phrases returning fewer results than expected?",
+    "evidence": "The query limit bounded the result page. A more-matches indicator distinguished truncation from missing indexed evidence."
+  },
+  {
+    "id": "case-39",
+    "query": "What caught damaged vectors before ranking?",
+    "evidence": "The search path checks model identity, vector dimensions, finite values, and normalization before computing similarity."
+  },
+  {
+    "id": "case-40",
+    "query": "How did a cancelled transfer resume without restarting from zero?",
+    "evidence": "The receiver fsyncs chunks and reports a durable byte offset. The sender resumes from that verified position using the same content hash."
+  },
+  {
+    "id": "case-41",
+    "query": "Why could a restored primary not reuse an arbitrary standby?",
+    "evidence": "Replica publication binds to an authority identity and rejects a different writer lineage. Recovery needs explicit reinitialization after the old writer is fenced."
+  },
+  {
+    "id": "case-42",
+    "query": "How did we make diagnostic logs safe to share?",
+    "evidence": "Errors report controlled categories instead of raw transcript fragments, authorization headers, or repository URLs containing credentials."
+  },
+  {
+    "id": "case-43",
+    "query": "What prevented a configuration typo from opening access?",
+    "evidence": "Malformed credential registries fail closed and return unavailable status rather than skipping validation or accepting every token."
+  },
+  {
+    "id": "case-44",
+    "query": "Why did a server acknowledgement still leave the client behind?",
+    "evidence": "The response was lost after the server committed. Repeating the same request identity recovered the receipt without creating a duplicate revision."
+  },
+  {
+    "id": "case-45",
+    "query": "How did we preserve manual filters after a search miss?",
+    "evidence": "The retrieval contract never broadens role, project, time, or session constraints automatically, even when the constrained result is empty."
+  },
+  {
+    "id": "case-46",
+    "query": "What made an index model change reversible?",
+    "evidence": "Embedding artifacts use separate identities, so new vectors can be prepared without overwriting the previous model namespace or canonical evidence."
+  },
+  {
+    "id": "case-47",
+    "query": "Why did ordinary searches unexpectedly start a long refresh?",
+    "evidence": "The old entry point coupled querying with capture. Read tools now inspect published state without launching ingestion or maintenance."
+  },
+  {
+    "id": "case-48",
+    "query": "How did we keep historical imports separate from live capture?",
+    "evidence": "Historical adapters populate an isolated canonical store, while only the current Codex adapter discovers and captures new session files."
+  },
+  {
+    "id": "case-49",
+    "query": "What prevented the backup command from pruning valuable history?",
+    "evidence": "Repository initialization, snapshot pruning, and source offload are explicit administration operations; ordinary backup never performs them implicitly."
+  },
+  {
+    "id": "case-50",
+    "query": "Why did an upload fail while short searches were healthy?",
+    "evidence": "Finalizing a multi-gigabyte object took longer than the interactive deadline. A separate upload timeout allowed checksum verification without delaying read failover."
+  }
+]

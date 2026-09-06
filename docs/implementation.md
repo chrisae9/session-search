@@ -12,6 +12,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Idle client queue compaction that preserves acknowledgements and capture checkpoints.
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
 - [x] Process-shared background embedding admission and bounded retries during provider outages.
+- [x] New embedding work selects chunks referenced by current session revisions, retaining older evidence and citations.
 - [x] Three read-only MCP tools and authenticated HTTP transport.
 - [x] Monotonic SSH credential propagation, exact acknowledgements, and independent retry timer templates.
 - [x] Verified snapshot creation and atomic read-only replica activation.
@@ -29,6 +30,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
 - [ ] Offline installation with MCP/local inference extras, quality/performance evaluations, and migration.
+- [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [ ] Provenance clearance, GitHub publication, and deployment.
 
 Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.
