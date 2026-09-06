@@ -1,5 +1,9 @@
 # Manual client offload
 
+This is an optional integrated workflow, not a prerequisite for search or capture.
+Operators using external backups own their retention policy; these commands do not
+automatically accept external backup jobs as restore proof. See [backup ownership](backup-ownership.md).
+
 Offload removes eligible native Codex JSONL files after fresh restoration from every configured backup destination. It preserves searchable server evidence and raw recovery copies. It is never part of scheduled capture or an MCP search operation.
 
 First enable [primary verification](../deploy/README.md) with a complete recovery receipt and enough restore workspace. Replica availability alone is insufficient. Each client needs exact raw acknowledgements from successful archival uploads; older queue records without that mapping are reported as missing and remain in place. Use `recover-client-acknowledgements` with the same client data, primary, and token options to recover missing mappings without reading or uploading raw files. It matches the primary’s current, device-owned record to the client’s existing checkpoint and acknowledged revision; it never rebases a head. Recovery scans up to 1,000 sources per call. When `next_cursor` is returned, pass it with `--cursor` to continue past unresolved records. Ambiguous or mismatched records remain unresolved; an explicitly requested archival recapture and flush may be needed.

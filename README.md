@@ -2,10 +2,11 @@
 
 Find useful evidence from past coding sessions through your agent.
 
-**Under development.** Local and remote capture, cited retrieval, CLI/MCP, authenticated search failover, shared raw storage, and scheduled client sync are implemented and running in a pilot deployment. Historical import and exact backup restoration have been exercised. Reviewed thin-client offload is implemented and tested with synthetic files; live cleanup remains disabled. Full independent backup coverage, broader client and local-inference qualification, and release clearance remain unfinished.
+**Under development.** Local and remote capture, cited retrieval, CLI/MCP, authenticated search failover, shared raw storage, and scheduled client sync are implemented and running in a pilot deployment. Historical import and exact backup restoration have been exercised. Reviewed thin-client offload is implemented and tested with synthetic files; live cleanup remains disabled. Broader client and local-inference qualification and release clearance remain unfinished. Backups and retention are operator-owned; replica and Restic integrations are optional.
 
 - [Architecture and diagrams](docs/architecture-rendered.md)
 - [Editable Mermaid source](docs/architecture.md)
+- [Backup ownership](docs/backup-ownership.md)
 - [Reliability contract](docs/reliability.md)
 - [Implementation progress](docs/implementation.md)
 - [Development usage](docs/usage.md)

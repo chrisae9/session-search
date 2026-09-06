@@ -2,13 +2,13 @@
 
 Rendered companion to the [editable Mermaid source](architecture.md).
 
-**Proposed design.** Diagrams describe intended behavior. Host names in the deployment example are replaceable; local mode requires no server.
+Session Search supports an isolated local installation or a shared service. These diagrams describe roles and data flow; deployment addresses and backup policy belong in operator configuration.
 
 ## 1. One agent interface, two modes
 
 The agent uses three tools: `search`, `context`, and `status`. Configuration selects where the work happens.
 
-![diagram](./agent-access.svg)
+![Architecture diagram](./agent-access.svg)
 
 These are alternative deployment modes. The isolated installation never uploads data or falls back to a remote model. Its model is provisioned explicitly; keyword search remains usable if the model is absent.
 
@@ -20,23 +20,27 @@ These are alternative deployment modes. The isolated installation never uploads 
 
 The `session-search` CLI handles setup, capture, backup verification, and manual offload. Search output defaults to a 16 KiB total budget; context defaults to 32 KiB. Both cap at 64 KiB and report omissions.
 
-## 2. Personal deployment: one writer, a search standby
+## 2. One primary service, optional infrastructure
 
-Clients connect through authenticated HTTPS over Tailscale. Joining the network provides reachability; each device also needs Session Search credentials.
+Clients use authenticated HTTPS. A private network such as Tailscale can provide
+reachability; each client still needs its own application credential.
 
-![diagram](./personal-deployment.svg)
+![Architecture diagram](./service-deployment.svg)
 
-Kiwi remains the only writer. Clients retain pending uploads while it is unavailable; the standby never accepts those writes. Search retries eligible connection failures, timeouts, and transient server errors against the standby. Authentication and invalid-request errors are returned directly.
+A single primary is sufficient. Clients retain pending uploads during an outage.
+An optional read-only replica can serve searches, but never accepts uploads or
+becomes a writer automatically. Without a replica, a primary outage is reported
+as unavailable rather than as an empty result.
 
-ArchITX serves Qwen3-Embedding-0.6B-Q8 with 1,024-dimensional vectors. Kiwi's embedding service is disabled in this deployment; this does not require reembedding when model identity and preprocessing remain compatible. Plex changes and testing are outside Session Search's work.
-
-Both search servers depend on the same embedder. Its failure therefore degrades both to keyword search; having two search servers does not provide embedding redundancy. When both search servers are unreachable, lightweight clients report search unavailable.
+Embeddings can run locally or through an explicitly configured endpoint. Provider
+failure falls back to keyword search. Changing deployment location does not require
+reembedding when model identity and preprocessing remain compatible.
 
 ## 3. Capture first, add semantic search independently
 
 Acknowledged history must survive a process restart. Embedding availability must never block durable capture or keyword indexing.
 
-![diagram](./capture-and-search.svg)
+![Architecture diagram](./capture-and-search.svg)
 
 Capture stages complete JSONL records and retries partial tails later. With `--incremental`, persistent checkpoints reuse completed turns after verifying the full prior byte prefix and session ownership. A missing or incompatible checkpoint falls back to a full parse. Staging and prefix verification still read existing bytes; incremental parsing does not make total capture I/O constant. Upload retries preserve identity, and acknowledgement follows durable content and metadata commits.
 
@@ -44,24 +48,33 @@ Keyword coverage becomes available before semantic work completes. Background in
 
 The primary updates its SQLite catalog transactionally. The standby activates verified immutable snapshots and pins generations for active readers. Keyword-only queries do not load vectors. Citations identify a session, revision, and event independently of a snapshot generation or a machine's file path.
 
-## 4. Reclaim local storage only after proving recovery
+## 4. Backups belong to the operator
 
-Search indexes are rebuildable. Canonical evidence and opted-in raw session files are retained separately. A search replica provides availability; backup snapshots provide recovery.
+Search availability and recoverability are separate. Operators choose their own
+backup software, destination, retention, and restore procedure. Session Search
+does not require a second computer, Restic, or a particular number of backup copies.
 
-![diagram](./verified-offload.svg)
+![Architecture diagram](./backup-boundary.svg)
 
-Offload retains at least 30 days locally, excludes active sessions, and requires indexed evidence plus exact raw-file recovery from both required backup destinations. Apply rechecks the reviewed plan, file identity, content hashes, and durability; changed or ambiguous files are skipped.
+Back up a consistent SQLite catalog together with its referenced immutable objects.
+Use an online SQLite backup or exclude writers during the copy; copying a changing
+database file alone is insufficient. Include runtime configuration and separately
+recoverable credentials if the service must be rebuilt on another machine.
 
-Removing a local copy never deletes shared history. Restoration uses an explicit destination and never overwrites an existing file. This recovers session evidence, not project files, attachments, credentials, or a complete Codex application installation.
+Raw session archival is opt-in. A search replica is not a complete recovery backup.
+Native session deletion is never automatic. The existing optional offload commands
+use their own explicit restore-proof policy; ordinary search and capture do not
+require that workflow, and an external backup is not silently treated as its proof.
+See [backup ownership](backup-ownership.md) for the boundary.
 
 ## Design choices
 
 | Choice | Reason |
 | --- | --- |
-| One writer; read-only standby | Avoid conflicting history while keeping search available. |
+| One primary; optional read-only replica | Keep the default deployment small; add availability only when needed. |
 | SQLite FTS5 and immutable generations | Keep deployment small and make publication consistent. |
 | Keyword search independent of embeddings | Keep fresh evidence searchable during model outages. |
 | Raw archival opt-in; offload manual | Let each device control what leaves it and what is removed. |
-| Same core, optional server | Support both shared personal history and an isolated work computer. |
+| Same core, optional server | Support shared history and isolated local installations. |
 
 See the [reliability contract](reliability.md) for the conditions these diagrams depend on.

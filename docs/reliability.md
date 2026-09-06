@@ -1,12 +1,12 @@
 # Reliability contract
 
-**Implementation requirements, not current guarantees.** These checks must pass before the corresponding feature is enabled.
+**Implementation requirements, not current guarantees.** These checks apply to the features an operator enables. Backup ownership and topology are operator choices; see [backup ownership](backup-ownership.md).
 
 ## Failure behavior
 
 | Condition | Required behavior |
 | --- | --- |
-| Primary unreachable | Retry eligible searches on the standby; retain pending uploads on clients. |
+| Primary unreachable | Retry eligible searches on a configured standby, otherwise report unavailable; retain pending uploads on clients. |
 | Both search servers unreachable | Report unavailable, including queued-capture status. Do not report an empty search result. |
 | Embedder unavailable or overloaded | Use bounded-deadline keyword fallback; continue capture, lexical indexing, replication, and backups. |
 | Standby behind | Report its coverage and age. If a cited revision is absent, report unavailable context rather than substituting another revision. |
@@ -23,9 +23,9 @@ pending work. These responses remain `unavailable`, never empty search results.
 
 Track upload acknowledgement, lexical coverage, semantic coverage, replication, and backup completion separately. A healthy repository or recent backup time does not prove that a particular session revision is recoverable.
 
-Replicate every five minutes, coalescing overlapping work. Explicit publication pipelines may request an additional run; embedding batches do not start replication automatically. Stage and verify all referenced evidence before atomically activating a replica generation. Pin active readers; retain current and previous generations. Their retirement must not remove canonical evidence needed by old citations.
+If a replica is configured, choose an interval appropriate to capacity and freshness needs; the supplied timer example uses five minutes and coalesces overlapping work. Explicit publication pipelines may request an additional run; embedding batches do not start replication automatically. Stage and verify all referenced evidence before atomically activating a replica generation. Pin active readers; retain current and previous generations. Their retirement must not remove canonical evidence needed by old citations.
 
-Back up every six hours using a consistent database snapshot and referenced objects. Offload receipts identify the raw digest, normalized revision, and containing snapshot on each required destination. Restore and hash verification must succeed for those exact contents.
+The operator chooses backup software, destinations and frequency. Use a consistent database snapshot and referenced objects. The optional integrated backup/offload workflow uses exact restore receipts for its explicitly configured destinations; it is not a prerequisite for search or capture.
 
 Replication and backup intervals are schedules, not guaranteed recovery windows. Outages can extend both. Status reports the actual recoverable coverage; recently acknowledged but unreplicated data may be lost with the primary and its originating client.
 
@@ -34,8 +34,7 @@ Permanent primary loss requires an operator to fence the old writer, restore val
 Bound downloaded context caches, reclaim completed transfer staging, and retire obsolete unpinned index generations. Pending work is retained with backpressure. Canonical evidence deletion and backup pruning remain manual in v1. Backup credentials must be recoverable independently of the primary.
 
 See [storage maintenance](storage-maintenance.md) for implemented cleanup triggers
-and retained artifacts. In particular, abandoned server partial uploads and
-completed backup receipts do not yet have bounded retention.
+and retained artifacts. In particular, manual partial-upload expiry is available; completed backup receipts do not yet have bounded retention.
 
 Check which other jobs manage a backup destination. A repository inside an rsync
 mirror can be deleted as destination-only data. Protect its directory with an
@@ -57,12 +56,13 @@ Import into a separate Session Search store and prevent legacy publishers from w
 
 | Gate | Required evidence |
 | --- | --- |
+| Privacy | Current files, rendered assets and intended public history contain no private deployment identifiers. |
 | Capture | Crash tests around content commit, metadata commit, and acknowledgement; retries lose no acknowledged revision and create no duplicates. |
 | Search parity | Existing literal, role, time, filter, and matched-context cases pass through CLI and MCP. |
 | Model outage | Newly captured evidence is keyword-searchable; semantic coverage catches up without duplicate records. |
 | Interactive capacity | Sustained background ingestion does not monopolize embedding slots; deadlines and cancellation work. |
 | Replica safety | Interrupted transfers expose only a complete old or new generation; immutable citations never resolve to different evidence. |
-| Recovery | Restore exact session revisions from both destinations; recover a replacement primary with one writer. |
+| Recovery | Verify exact restoration under the operator’s chosen backup policy; recover a replacement primary with one writer. |
 | Offload | Changed files, active writers, missing receipts, or failed restores block removal. Reconnecting legacy clients cannot delete retained history. |
 | Local isolation | With networking disabled, capture and search work; no implicit downloads or remote fallback occur. |
 | Storage | Repeated indexing and interrupted uploads reclaim abandoned artifacts without deleting pending work or cited evidence. |

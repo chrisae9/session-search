@@ -18,3 +18,5 @@ Preserve these invariants:
 - Never print credentials or transcript-containing exceptions to logs.
 
 Keep optional dependencies behind their corresponding feature boundary. Do not add a second production language, a UI, graph memory, or additional infrastructure without a measured need and a scope decision.
+
+Keep committed examples, diagrams and documentation generic. Never include real deployment hostnames, private addresses, account paths, or home-network resource names. Before public release, audit the intended Git history as well as the current files and rendered assets.

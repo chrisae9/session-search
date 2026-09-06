@@ -185,7 +185,7 @@ Activation retires obsolete generations while retaining the current and previous
 
 SSH replication consumes its verified incoming directory during activation, avoiding a second catalog copy on the standby. The sender retains its snapshot until acknowledgement and can resend after interruption. Reserve space for the current, previous, and incoming generations, plus any generations pinned by active readers and separate recovery backups.
 
-`backup` takes a repository configuration containing at least two distinct initialized Restic repositories, each with `name`, `repository`, and `password_file`. It restores each completed backup before writing a recovery receipt. Repository initialization and backup pruning are never implicit.
+For operators choosing the optional integrated recovery workflow, `backup` takes a repository configuration containing at least two distinct initialized Restic repositories, each with `name`, `repository`, and `password_file`. It restores each completed backup before writing a recovery receipt. Repository initialization and backup pruning are never implicit.
 
 Set each repository's optional `restore_directory` to an existing scratch directory with room for the complete uncompressed restore. Restore verification runs on the invoking data host, even when the repository is remote. Do not size this directory from the compressed backup size.
 

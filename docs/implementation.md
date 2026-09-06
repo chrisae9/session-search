@@ -1,6 +1,6 @@
 # Implementation progress
 
-This checklist records delivered behavior, separately from the target architecture.
+This checklist records delivered behavior, separately from the target architecture. Replica, Restic and offload features are optional. Operator-owned backups are the default boundary; a second repository or machine is not a core deployment requirement.
 
 - [x] Standalone Python package and optional dependency groups.
 - [x] Codex parser extraction with existing regression fixtures.
@@ -65,9 +65,9 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Opt-in shared raw/normalized upload staging byte admission with bounded scans, retryable capacity failures, and process concurrency/crash checks.
 - [ ] Bounded server staging and archival maintenance retention, with separate recovery-safe receipt retention.
 - [x] Pilot authenticated primary/standby deployment, actual MCP search failover, and credential revocation propagation.
-- [ ] Additional client rollout, full independent backup coverage, and live replacement-primary rehearsal.
+- [ ] Additional client rollout and broader replacement-primary qualification.
 - [x] Retryable backup cycles, per-destination restore receipts, capacity checks, status, and six-hour timer template.
-- [ ] Live recurring backup rollout after full independent destination capacity is available.
+- [x] Backup ownership documented independently of optional integrated backup scheduling.
 - [x] Pilot historical import with legacy citation resolution checks.
 - [x] Apple Silicon macOS 26 native-inference bundle installation and semantic engine check with OS networking denied.
 - [x] Fresh-process local semantic MCP, concurrent literal query, context, and status with OS networking denied.
@@ -76,7 +76,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Additional native-runtime platforms and whole-corpus quality/performance qualification.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
-- [ ] Provenance clearance, GitHub publication, and deployment.
+- [ ] Provenance clearance and public release (not authorized).
 
 Legacy storage remains separate from the imported Session Search catalog. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload uses fresh server-side recovery verification; live rollout remains gated on full independent backup coverage.
 
