@@ -57,11 +57,14 @@ This timer only replicates searchable evidence. Credential propagation, capture 
 
 The primary can install `session-search-embed.service` and its timer independently of replication. Provide a private `embedding.env` containing `SESSION_SEARCH_DATA`, `SESSION_SEARCH_EMBEDDING_CONFIG`, and `SESSION_SEARCH_EMBEDDING_BATCH` (1–10000). The model configuration must identify the explicitly provisioned remote embedding service. This data-host unit does not download or start a model. Replication runs on its own timer, so pausing it for destination capacity does not stop embedding progress, and embedding batches do not trigger extra snapshots.
 
+Each run indexes a bounded batch. The timer waits 30 seconds between completed runs. A process-shared catalog lock permits only one background indexer at a time; query embeddings bypass it. Three consecutive provider failures end the batch early, leaving the remaining evidence pending. Standbys cannot run this worker. For local-only installations, use the local provider directly without this remote-model service unit.
+
+## Client offload verification
+
 Fresh offload verification is opt-in on the primary: `serve --offload-repositories <config> --offload-receipt <receipt>`. Both files are server-owned administration inputs. Authenticated devices can submit up to 100 exact raw requirements from their acknowledged revisions to `POST /v1/offload-verifications`, with a fresh 64-character hexadecimal nonce, then poll `GET /v1/offload-verifications/{job_id}`. These requests never fail over to a standby.
 
 One subprocess performs fresh restores at a time, with a 2 GiB free-space reserve checked before each restore. Results are device-owned, expire after 15 minutes, and are capped at 32 retained jobs. Interrupted work cannot produce a successful proof; retry with a new nonce. The admission lock is inherited by Restic so a surviving restore still blocks another job if its worker exits. Job-owned restore scratch is reclaimed after that lock is released; ownership markers remain until cleanup finishes, so interrupted cleanup can be retried safely. Use the [manual client offload workflow](../docs/offload.md) to review a plan and apply it with fresh verification and final native-file checks. A verification result is not an offline deletion permit.
 
-Each run indexes a bounded batch, then requests replication. The timer waits 30 seconds between completed runs. A process-shared catalog lock permits only one background indexer at a time; query embeddings bypass it. Three consecutive provider failures end the batch early, leaving the remaining evidence pending. Standbys cannot run this worker. For local-only installations, use the local provider directly without this remote-model service unit.
 
 ## Recurring capture
 

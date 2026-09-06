@@ -2,7 +2,7 @@
 
 Find useful evidence from past coding sessions through your agent.
 
-**Under development.** Local and remote capture, cited retrieval, CLI/MCP, authenticated search failover, shared raw storage, and scheduled client sync are implemented and running in a pilot deployment. Historical import and exact backup restoration have been exercised. Full independent backup coverage, thin-client offload coordination, local inference packaging, and release qualification remain unfinished.
+**Under development.** Local and remote capture, cited retrieval, CLI/MCP, authenticated search failover, shared raw storage, and scheduled client sync are implemented and running in a pilot deployment. Historical import and exact backup restoration have been exercised. Reviewed thin-client offload is implemented and tested with synthetic files; live cleanup remains disabled. Full independent backup coverage, broader client and local-inference qualification, and release clearance remain unfinished.
 
 - [Architecture and diagrams](docs/architecture-rendered.md)
 - [Editable Mermaid source](docs/architecture.md)
@@ -20,4 +20,4 @@ uv run session-search --help
 
 After installation, the `session-search` executable runs without a package-manager or network bootstrap. Embedding model files are provisioned explicitly. Keyword search does not require a model.
 
-Licensed under Apache-2.0. See [provenance](docs/provenance.md) for reused components.
+New application code is licensed under Apache-2.0. Publication remains gated on [provenance clearance](docs/provenance.md) for reused parser components and dependency distribution review.
