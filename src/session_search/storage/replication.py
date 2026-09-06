@@ -47,8 +47,7 @@ def receive_replica(snapshot: Path, root: Path) -> dict:
     verified = verify_snapshot(snapshot)
     if verified['snapshot'] != snapshot.name or verified['purpose'] != 'search-replica':
         raise ValueError('received snapshot identity or purpose mismatch')
-    result = activate_replica(snapshot, root)
-    shutil.rmtree(snapshot)
+    result = activate_replica(snapshot, root, consume=True)
     sync_directory(snapshot.parent)
     return result
 

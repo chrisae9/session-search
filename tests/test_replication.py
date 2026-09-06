@@ -93,3 +93,27 @@ def test_unreadable_replication_receipt_does_not_disable_search(tmp_path):
         result = catalog.search(SearchQuery('retained'))
         assert result['results']
         assert result['coverage']['replication']['status'] == 'partial'
+
+
+def test_received_replica_publishes_without_a_second_catalog_copy(tmp_path, monkeypatch):
+    primary, replica = tmp_path / 'primary', tmp_path / 'replica'
+    original = tmp_path / 'snapshot'
+    with Catalog(primary) as catalog:
+        catalog.ingest(SessionRevision('s', (Event('e', 'user', 'retained evidence'),)),
+                       producer='d', request_id='one')
+        result = create_snapshot(catalog, original, search_only=True)
+    incoming = replica / 'incoming' / result['snapshot']
+    incoming.parent.mkdir(parents=True)
+    original.rename(incoming)
+    inode = (incoming / 'catalog.sqlite3').stat().st_ino
+
+    def unexpected_copy(*args, **kwargs):
+        raise AssertionError('receive must not duplicate the transferred catalog')
+
+    monkeypatch.setattr(shutil, 'copytree', unexpected_copy)
+    assert receive_replica(incoming, replica)['status'] == 'verified'
+    assert not incoming.exists()
+    published = replica / 'generations' / result['snapshot'] / 'catalog.sqlite3'
+    assert published.stat().st_ino == inode
+    with Catalog(replica, readonly=True) as catalog:
+        assert catalog.search(SearchQuery('retained'))['results']

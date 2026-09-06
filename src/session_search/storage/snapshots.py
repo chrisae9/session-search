@@ -129,8 +129,8 @@ def verify_snapshot(path: Path) -> dict:
             "created_at": manifest["created_at"]}
 
 
-def activate_replica(snapshot: Path, replica: Path) -> dict:
-    """Copy and verify before switching the small CURRENT pointer atomically."""
+def activate_replica(snapshot: Path, replica: Path, *, consume: bool = False) -> dict:
+    """Verify before atomic publication; managed incoming transfers can be moved."""
     verified = verify_snapshot(snapshot)
     replica = replica.resolve()
     if (replica / "catalog.sqlite3").exists():
@@ -141,7 +141,14 @@ def activate_replica(snapshot: Path, replica: Path) -> dict:
     generation = generations / verified["snapshot"]
     stage = Path(tempfile.mkdtemp(prefix=".transfer-", dir=generations))
     try:
-        shutil.copytree(snapshot, stage, dirs_exist_ok=True, symlinks=False)
+        if consume:
+            # The sender retains its pending snapshot until acknowledgement.
+            # Moving a completed local transfer avoids another full catalog copy.
+            # A retry recreates incoming independently of published generations.
+            os.rename(snapshot, stage)
+            sync_directory(snapshot.parent)
+        else:
+            shutil.copytree(snapshot, stage, dirs_exist_ok=True, symlinks=False)
         copied = verify_snapshot(stage)
         if copied["snapshot"] != verified["snapshot"]:
             raise ValueError("snapshot changed during transfer")

@@ -62,6 +62,8 @@ For a space-constrained search standby, `snapshot DESTINATION --search-only` kee
 
 Activation retires obsolete generations while retaining the current and previous snapshots and any older snapshot held by an active reader. Reader pins use operating-system locks and are released if the reader crashes. `prune-replica` repeats this cleanup after readers finish. It only removes managed replica generations; canonical evidence in the current catalog, source snapshots, and backup repositories remain intact.
 
+SSH replication consumes its verified incoming directory during activation, avoiding a second catalog copy on the standby. The sender retains its snapshot until acknowledgement and can resend after interruption. Reserve space for the current, previous, and incoming generations, plus any generations pinned by active readers and separate recovery backups.
+
 `backup` takes a repository configuration containing at least two distinct initialized Restic repositories, each with `name`, `repository`, and `password_file`. It restores each completed backup before writing a recovery receipt. Repository initialization and backup pruning are never implicit.
 
 Set each repository's optional `restore_directory` to an existing scratch directory with room for the complete uncompressed restore. Restore verification runs on the invoking data host, even when the repository is remote. Do not size this directory from the compressed backup size.
