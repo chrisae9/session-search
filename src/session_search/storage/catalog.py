@@ -86,12 +86,21 @@ def match_offset(text: str, query: str) -> int:
     match = re.search(re.escape(query.strip('"')), text, re.IGNORECASE)
     if match:
         return match.start()
-    positions = []
+    candidates = []
     for phrase, word in re.findall(r'"([^"]+)"|(\S+)', query):
-        match = re.search(re.escape(phrase or word), text, re.IGNORECASE)
+        value = phrase or word.rstrip("?!,;:")
+        if not value:
+            continue
+        # A question's short words must not anchor snippets inside unrelated
+        # words (for example, "we" inside "answer"). Prefer an explicit phrase,
+        # then a longer query term; this affects presentation, never ranking.
+        pattern = ((r"(?<!\w)" if value[0].isalnum() or value[0] == "_" else "")
+                   + re.escape(value)
+                   + (r"(?!\w)" if value[-1].isalnum() or value[-1] == "_" else ""))
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            positions.append(match.start())
-    return min(positions, default=0)
+            candidates.append((bool(phrase), len(value), -match.start()))
+    return -max(candidates)[2] if candidates else 0
 
 
 def excerpt(text: str, query: str, limit: int = 800) -> str:

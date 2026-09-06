@@ -10,7 +10,7 @@ from dataclasses import replace
 
 from session_search.core.embeddings import validate_vector
 from session_search.core.records import Citation, digest
-from session_search.storage.catalog import Catalog, excerpt
+from session_search.storage.catalog import Catalog, excerpt, match_offset
 
 SEMANTIC_SCHEMA = """
 CREATE TABLE IF NOT EXISTS semantic_chunks (
@@ -181,9 +181,11 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                     "ON r.session_id=e.session_id AND r.revision=e.revision WHERE e.row_id=?",
                     (row_id,),
                 ).fetchone()
+                chunk = row["text"][start:start + 6000]
+                offset = start + match_offset(chunk, query.text)
                 semantic.append({
-                    "citation": Citation(row["session_id"], row["revision"], row["event_id"], start).to_dict(),
-                    "excerpt": excerpt(row["text"][start:start + 6000], query.text), "role": row["role"],
+                    "citation": Citation(row["session_id"], row["revision"], row["event_id"], offset).to_dict(),
+                    "excerpt": excerpt(chunk, query.text), "role": row["role"],
                     "timestamp": row["timestamp"], "origin": row["origin"],
                     "project": row["project"], "title": row["title"], "score": score,
                 })

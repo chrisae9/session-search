@@ -11,6 +11,31 @@ def session(text="backup restore", **kwargs):
     return SessionRevision("session-1", (Event("e1", "user", text, "2026-01-01Z"),), **kwargs)
 
 
+def test_question_excerpt_and_citation_reach_subject_in_long_event(tmp_path):
+    text = "The answer is below. We checked it. " + "background " * 600
+    text += "OpenCodex models appear after refreshing the catalog."
+    with Catalog(tmp_path) as catalog:
+        revision = session(text)
+        catalog.ingest(revision, producer="a", request_id="long")
+        hit = catalog.search(SearchQuery("How did we make OpenCodex models appear?"))["results"][0]
+        assert hit["citation"]["offset"] == text.index("OpenCodex")
+        assert "OpenCodex models appear" in hit["excerpt"]
+        expanded = catalog.context([hit["citation"]], neighbors=0)["results"][0]
+        assert "OpenCodex models appear" in expanded["events"][0]["text"]
+        assert expanded["citation"]["revision"] == revision.revision
+
+
+def test_snippet_anchors_preserve_exact_matches_and_prefer_explicit_phrases():
+    from session_search.storage.catalog import match_offset
+    assert match_offset("concatenate", "cat") == 3  # Exact substring remains literal-safe.
+    assert match_offset("Before: How did we fix it?", "How did we") == 8
+    text = "configuration " + "background " * 100 + "API key"
+    assert match_offset(text, '"API key" configuration') == text.index("API key")
+    assert match_offset("answer then models", "we models") == 12
+    assert match_offset("models then models", "where models") == 0
+    assert match_offset("nothing here", "missing subject") == 0
+
+
 def test_revision_retry_never_rewinds_head_or_changes_old_citation(tmp_path):
     with Catalog(tmp_path) as catalog:
         first = session()

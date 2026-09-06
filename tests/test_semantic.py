@@ -21,6 +21,23 @@ def populate(catalog):
     catalog.ingest(SessionRevision("s", events), producer="d", request_id="1")
 
 
+def test_hybrid_context_keeps_match_near_end_of_selected_chunk(tmp_path):
+    text = "background " * 470 + "recovery procedure preserves old evidence"
+    assert 4096 < text.index("recovery") < len(text) < 5700
+    with Catalog(tmp_path) as catalog:
+        catalog.ingest(SessionRevision("s", (Event("long", "user", text),)),
+                       producer="d", request_id="late-match")
+        provider = FakeProvider()
+        index_pending(catalog, provider)
+        result = hybrid_search(catalog, SearchQuery("How did we improve recovery?"), provider)
+        assert result["mode"] == "hybrid"
+        hit = result["results"][0]
+        assert hit["citation"]["offset"] == text.index("recovery")
+        assert "recovery procedure" in hit["excerpt"]
+        expanded = catalog.context([hit["citation"]], neighbors=0)["results"][0]
+        assert "recovery procedure" in expanded["events"][0]["text"]
+
+
 @pytest.mark.parametrize("event_count,long_chunks", [(520, False), (1, True)])
 def test_semantic_ties_preserve_candidates_and_offsets_across_scan_orders(
     tmp_path, event_count, long_chunks,
