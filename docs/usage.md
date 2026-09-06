@@ -292,12 +292,13 @@ The pilot primary has the index enabled; its standby still uses the scan path.
 Broader workload and replica qualification remain outstanding.
 
 
-## Optional keyword ranking index
+## Optional search metadata index
 
 `build-metadata-index` builds a covering index on an existing local catalog.
 Keyword search ranks metadata first and reads transcript text only for the final
 matches. Scores, filters, ordering, and citations retain their existing semantics.
-Hybrid search uses this path for its keyword candidates; vector retrieval is unchanged.
+Hybrid search also filters vector candidates through this index, then loads text
+for the final semantic hits. Vector scoring and coverage accounting are unchanged.
 
 ```sh
 session-search --data-dir DATA_DIRECTORY build-metadata-index

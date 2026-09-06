@@ -83,6 +83,17 @@ The indexed path took 0.28–1.63 seconds and read about 0.07–0.11 GB. The ind
 measurements on three queries, not full hybrid latency or whole-corpus relevance
 qualification. Cache hints are advisory, and other host work continued.
 
+A separate full-hybrid comparison reused the same frozen catalog and metadata
+index, changing only the vector candidate SQL to read covering metadata. Three
+queries ran in baseline/candidate/candidate/baseline order with per-file cache
+eviction hints. Each query reused one actual query embedding across variants.
+All 12 complete responses matched, including scores, citations, and coverage.
+The baseline took 19.6–23.9 seconds and read 1.48–2.11 GB; the candidate took
+10.2–13.3 seconds and read 0.59–1.52 GB. This added no further index storage.
+These cold-cache measurements exclude embedding-request latency and do not
+establish the normal client deadline, concurrent performance, or broader relevance.
+Coverage accounting and exact vector scoring still contribute to hybrid latency.
+
 ## Concurrent embedding requests
 
 A two-minute pilot check kept one synthetic background worker continuously

@@ -11,6 +11,7 @@ from dataclasses import replace
 from session_search.core.embeddings import validate_vector
 from session_search.core.records import Citation, digest
 from session_search.storage.catalog import Catalog, excerpt, match_offset
+from session_search.storage import metadata_index
 
 SEMANTIC_SCHEMA = """
 CREATE TABLE IF NOT EXISTS semantic_chunks (
@@ -146,8 +147,11 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             # Identity is checked in SQL before a vector is ever decoded.
             conditions.append("v.identity=?")
             args.append(provider.identity.key)
+            # Candidate filtering only needs metadata; load transcript text for
+            # the final semantic hits below. Older catalogs retain the view path.
+            source = metadata_index.event_source() if metadata_index.ready(catalog.db) else "events e"
             cursor = catalog.db.execute(
-                cte + "SELECT e.row_id,v.vector,c.chunk_start FROM events e "
+                cte + f"SELECT e.row_id,v.vector,c.chunk_start FROM {source} "
                 "JOIN heads h ON h.session_id=e.session_id AND h.revision=e.revision "
                 "JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision "
                 "JOIN event_chunks c ON c.event_row=e.row_id "

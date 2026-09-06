@@ -49,7 +49,7 @@ def test_index_preserves_entire_responses_filters_and_later_capture(tmp_path, mo
             assert c.search(query) == reference
         provider = Provider()
         index_pending(c, provider, limit=1000)
-        for query in queries[:6]:
+        for query in queries:
             with monkeypatch.context() as patch:
                 patch.setattr(metadata_index, 'ready', lambda db: False)
                 reference = hybrid_search(c, query, provider)
@@ -115,3 +115,9 @@ def test_metadata_ranking_retains_imported_project_aliases(tmp_path, monkeypatch
             reference = c.search(query)
         assert c.search(query) == reference
         assert reference['results'][0]['citation']['revision'] == native.revision
+        provider = Provider()
+        index_pending(c, provider)
+        with monkeypatch.context() as patch:
+            patch.setattr(metadata_index, 'ready', lambda db: False)
+            reference = hybrid_search(c, query, provider)
+        assert hybrid_search(c, query, provider) == reference

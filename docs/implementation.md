@@ -8,6 +8,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Bounded byte staging of complete records, including large partial tails, with strict validation during parsing.
 - [x] Transactional canonical revisions and lexical retrieval.
 - [x] Persistent active-evidence lookup index avoids repeated temporary-index construction for keyword queries.
+- [x] Optional covering metadata index reduces transcript-page reads during keyword ranking and semantic candidate filtering, with fallback for catalogs without the index.
 - [x] Opt-in atomic literal substring index with transactional maintenance and scan fallback.
 - [x] Pilot primary literal-index deployment with authenticated retrieval, citation expansion, and standby fallback checks.
 - [x] Frozen historical-catalog literal qualification: 32 full-response comparisons against the scan path across query forms and filters.
