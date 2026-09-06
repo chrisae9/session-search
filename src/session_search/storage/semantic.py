@@ -195,13 +195,14 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             lexical["semantic_available"] = True
             lexical["embedding_identity"] = provider.identity.key
             lexical["more_matches"] = len(ordered) > query.limit
+            # Coverage needs active row identities, not the large evidence text pages.
             lexical["coverage"]["semantic_indexed"] = catalog.db.execute(
-                "SELECT COUNT(DISTINCT e.row_id) FROM events e JOIN heads h "
-                "ON h.session_id=e.session_id AND h.revision=e.revision "
-                "WHERE EXISTS(SELECT 1 FROM event_chunks c WHERE c.event_row=e.row_id) "
+                "SELECT COUNT(DISTINCT a.event_row) FROM active_events a JOIN heads h "
+                "ON h.session_id=a.session_id "
+                "WHERE EXISTS(SELECT 1 FROM event_chunks c WHERE c.event_row=a.event_row) "
                 "AND NOT EXISTS(SELECT 1 FROM event_chunks c LEFT JOIN vectors v "
                 "ON v.content_hash=c.content_hash AND v.identity=? "
-                "WHERE c.event_row=e.row_id AND v.vector IS NULL)", (provider.identity.key,),
+                "WHERE c.event_row=a.event_row AND v.vector IS NULL)", (provider.identity.key,),
             ).fetchone()[0]
         except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
             lexical.update(mode="keyword", degraded=True, degradation=type(exc).__name__)

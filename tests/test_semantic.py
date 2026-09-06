@@ -159,3 +159,38 @@ def test_semantic_page_cache_is_scoped_and_restored_after_fallback(tmp_path):
         assert not catalog.db.in_transaction
         assert hybrid_search(catalog, SearchQuery("recovery", literal=True), provider)["results"]
         assert catalog.db.execute("PRAGMA cache_size").fetchone()[0] == -1234
+
+
+def test_coverage_counts_only_complete_current_events_for_selected_model(tmp_path):
+    with Catalog(tmp_path) as catalog:
+        provider = FakeProvider()
+        catalog.ingest(SessionRevision('s', (
+            Event('old', 'user', 'old recovery'),
+            Event('shared', 'user', 'shared recovery'),
+        )), producer='d', request_id='old')
+        index_pending(catalog, provider)
+        catalog.ingest(SessionRevision('s', (
+            Event('shared', 'user', 'shared recovery'),
+            Event('long', 'user', 'long recovery ' * 1000),
+            Event('pending', 'user', 'pending recovery'),
+        )), producer='d', request_id='new')
+        # Chunk preparation without successful inference leaves new events uncovered.
+        class Offline(FakeProvider):
+            def embed(self, *args, **kwargs):
+                raise OSError('offline')
+        index_pending(catalog, Offline())
+        assert hybrid_search(catalog, SearchQuery('recovery'), provider)['coverage']['semantic_indexed'] == 1
+        catalog.db.execute('UPDATE embedding_failures SET next_attempt=0')
+        catalog.db.commit()
+        index_pending(catalog, provider)
+        assert hybrid_search(catalog, SearchQuery('recovery'), provider)['coverage']['semantic_indexed'] == 3
+        # One missing chunk makes the entire long event incomplete, even though
+        # another model has that chunk and this model retains its other chunks.
+        key = catalog.db.execute(
+            "SELECT c.content_hash FROM event_chunks c JOIN evidence e ON e.row_id=c.event_row "
+            "WHERE e.event_id='long' ORDER BY c.chunk_start LIMIT 1"
+        ).fetchone()[0]
+        catalog.db.execute('UPDATE vectors SET identity=? WHERE identity=? AND content_hash=?',
+                           ('different-model', provider.identity.key, key))
+        catalog.db.commit()
+        assert hybrid_search(catalog, SearchQuery('recovery'), provider)['coverage']['semantic_indexed'] == 2
