@@ -18,13 +18,13 @@ def terms(text: str) -> str:
 def ready(db) -> bool:
     names = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE name IN "
-        "('literal_fts','literal_index_state','literal_fts_insert')")}
-    if len(names) != 3:
+        "('literal_fts','literal_index_state','literal_fts_insert','literal_nul')")}
+    if len(names) != 4:
         return False
     try:
         db.execute('SELECT rowid FROM literal_fts LIMIT 0')  # Check tokenizer availability.
         state = db.execute('SELECT version,high_water FROM literal_index_state WHERE id=1').fetchone()
-        return bool(state and state[0] == 1 and state[1] == db.execute(
+        return bool(state and state[0] == 2 and state[1] == db.execute(
             'SELECT COALESCE(MAX(row_id),0) FROM evidence').fetchone()[0])
     except sqlite3.DatabaseError:
         return False
@@ -50,12 +50,17 @@ def build(catalog, *, reserve_bytes: int = 2 * 1024 ** 3) -> dict:
         db.execute('DROP TRIGGER IF EXISTS literal_fts_insert')
         db.execute('DROP TABLE IF EXISTS literal_fts')
         db.execute('DROP TABLE IF EXISTS literal_index_state')
+        db.execute('DROP TABLE IF EXISTS literal_nul')
         db.execute("CREATE VIRTUAL TABLE literal_fts USING fts5(text,content='',detail=none,columnsize=0,tokenize='trigram')")
-        db.execute("INSERT INTO literal_fts(rowid,text) SELECT row_id,replace(text,char(0),' ') FROM evidence")
+        db.execute("INSERT INTO literal_fts(rowid,text) SELECT row_id,text FROM evidence")
+        # Older tokenizers stop at NUL. Keep these rows as unconditional candidates.
+        db.execute('CREATE TABLE literal_nul(rowid INTEGER PRIMARY KEY)')
+        db.execute('INSERT INTO literal_nul SELECT row_id FROM evidence WHERE instr(text,char(0))>0')
         db.execute('CREATE TABLE literal_index_state(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL,high_water INTEGER NOT NULL)')
-        db.execute('INSERT INTO literal_index_state SELECT 1,1,COALESCE(MAX(row_id),0) FROM evidence')
+        db.execute('INSERT INTO literal_index_state SELECT 1,2,COALESCE(MAX(row_id),0) FROM evidence')
         db.execute('''CREATE TRIGGER literal_fts_insert AFTER INSERT ON evidence BEGIN
-            INSERT INTO literal_fts(rowid,text) VALUES (NEW.row_id,replace(NEW.text,char(0),' '));
+            INSERT INTO literal_fts(rowid,text) VALUES (NEW.row_id,NEW.text);
+            INSERT INTO literal_nul SELECT NEW.row_id WHERE instr(NEW.text,char(0))>0;
             UPDATE literal_index_state SET high_water=MAX(high_water,NEW.row_id) WHERE id=1;
         END''')
         catalog.bump_publication()

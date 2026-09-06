@@ -258,9 +258,9 @@ application releases. Building the index advances the publication so future
 snapshots can carry it. It consumes replica and backup space as part of the catalog.
 
 Literal retrieval uses at most eight printable ASCII triples to narrow candidates,
-then applies its original exact substring predicate, filters, and ordering. NULs
-are replaced with spaces only in indexed candidate text, avoiding older SQLite
-trigram behavior that stops indexing at NUL. Original evidence remains exact. Short
+then applies its original exact substring predicate, filters, and ordering. Rows containing NULs
+are tracked separately and always pass the candidate filter, accommodating older
+tokenizers that stop at NUL without altering original evidence. Short
 or other queries without a usable triple use the scan path. Missing readiness,
 a missing maintenance trigger, unsupported tokenizer, or an evidence high-water
 mismatch also selects the scan path. It does not change keyword or hybrid ranking.

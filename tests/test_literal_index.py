@@ -33,7 +33,7 @@ def test_literal_index_preserves_filters_order_and_new_evidence(tmp_path):
             assert actual['more_matches'] == expected['more_matches']
         assert build(catalog)['status'] == 'unchanged'
         citation = catalog.search(SearchQuery('backup', literal=True))['results'][0]['citation']
-        catalog.ingest(SessionRevision('later', (Event('e', 'user', 'new backup insight',
+        catalog.ingest(SessionRevision('later', (Event('e', 'user', 'new\0backup insight',
                       timestamp='2026-02-01T00:00:00Z'),)), producer='first', request_id='later')
         assert ready(catalog.db)
         query = SearchQuery('backup', literal=True)

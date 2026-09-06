@@ -303,8 +303,8 @@ class Catalog:
             from session_search.storage.literal import ready, terms
             candidate = terms(query.text)
             if candidate and ready(self.db):
-                join_fts = "JOIN literal_fts ON literal_fts.rowid=e.row_id"
-                conditions.append("literal_fts MATCH ?")
+                conditions.append("e.row_id IN (SELECT rowid FROM literal_fts WHERE literal_fts MATCH ? "
+                                  "UNION SELECT rowid FROM literal_nul)")
                 args.append(candidate)
         else:
             conditions.append("evidence_fts MATCH ?")

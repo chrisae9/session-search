@@ -27,7 +27,9 @@ def main():
         before = path.stat().st_size
         start = time.monotonic()
         db.execute("CREATE VIRTUAL TABLE literal_probe USING fts5(text,content='',detail=none,columnsize=0,tokenize='trigram')")
-        db.execute("INSERT INTO literal_probe(rowid,text) SELECT row_id,replace(text,char(0),' ') FROM evidence")
+        db.execute("INSERT INTO literal_probe(rowid,text) SELECT row_id,text FROM evidence")
+        db.execute('CREATE TABLE literal_probe_nul(rowid INTEGER PRIMARY KEY)')
+        db.execute('INSERT INTO literal_probe_nul SELECT row_id FROM evidence WHERE instr(text,char(0))>0')
         db.commit()
         report = {'index_build_seconds': round(time.monotonic() - start, 3),
                   'index_added_bytes': path.stat().st_size - before, 'queries': []}
@@ -44,8 +46,9 @@ def main():
                 'JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision ')
             suffix = ' ORDER BY e.timestamp DESC,e.session_id,e.ordinal LIMIT 11'
             scan = base + ' WHERE ' + ' AND '.join(conditions) + suffix
-            indexed = (base + ' JOIN literal_probe ON literal_probe.rowid=e.row_id WHERE '
-                       + ' AND '.join([*conditions, 'literal_probe MATCH ?']) + suffix)
+            indexed = (base + ' WHERE ' + ' AND '.join([*conditions,
+                       'e.row_id IN (SELECT rowid FROM literal_probe WHERE literal_probe MATCH ? '
+                       'UNION SELECT rowid FROM literal_probe_nul)']) + suffix)
             observed = {}
             expected = None
             for name, sql, arguments in [('scan', scan, values), ('trigram', indexed, [*values, terms(text)])]:
