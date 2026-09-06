@@ -2,4 +2,6 @@ Session Search
 Copyright 2026 Session Search contributors
 
 Includes Codex parsing and normalization code developed for the author's
-earlier session-search skill. See docs/provenance.md for source history.
+earlier session-search skill. See docs/provenance.md in the source distribution,
+or session_search/PROVENANCE.md in the installed package, for source history
+and outstanding provenance limitations.
