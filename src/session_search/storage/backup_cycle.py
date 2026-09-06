@@ -2,6 +2,8 @@
 
 import fcntl
 import json
+import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -51,11 +53,25 @@ def backup_cycle(source: Path, outbox: Path, repositories, *, reserve_bytes=2 * 
                 raise ValueError("new backup outbox must be empty")
             state = {"version": 1, "binding": binding, "receipts": {}}
             save_receipt(state_path, state)
+        retired = outbox / ".retired"
+        if retired.exists() or retired.is_symlink():
+            # This directory can be partially removed after a crash. Its durable
+            # complete receipt, not its now-incomplete manifest, authorizes cleanup.
+            if not isinstance(state.get("snapshot"), str) or not re.fullmatch("[0-9a-f]{64}", state["snapshot"]):
+                raise ValueError("invalid retired snapshot identity")
+            expected = {"version": 1, "status": "restore_verified",
+                        "receipts": [state["receipts"][r.name] for r in repositories]}
+            completed = outbox / "receipts" / (state["snapshot"] + ".json")
+            if retired.is_symlink() or json.loads(completed.read_text()) != expected:
+                raise ValueError("retired snapshot lacks a matching completed receipt")
+            shutil.rmtree(retired)
+            sync_directory(outbox)
+
         def record(result, publication=None):
             completed_at = datetime.now(timezone.utc).isoformat()
             summary = {"version": 1, "status": result["status"], "completed_at": completed_at,
                        "required_destinations": len(repositories),
-                       "verified_destinations": len(state.get("receipts", {}))}
+                       "verified_destinations": len(result.get("receipts", result.get("verified_destinations", [])))}
             if publication:
                 summary["publication"] = publication
             if result.get("snapshot"):
@@ -93,6 +109,7 @@ def backup_cycle(source: Path, outbox: Path, repositories, *, reserve_bytes=2 * 
         save_receipt(state_path, state)
         failures = []
         known_ids = set()
+        confirmed = []
         # Restore materializes the full logical archive even when staging uses
         # shared chunks or hardlinks. Check each configured scratch filesystem.
         manifest = json.loads((pending / "manifest.json").read_text())
@@ -113,6 +130,7 @@ def backup_cycle(source: Path, outbox: Path, repositories, *, reserve_bytes=2 * 
                                 or receipt.get("source_path") != str(pending)):
                     raise ValueError("cached backup receipt does not match pending work")
                 if receipt:
+                    confirmed.append(repository.name)
                     continue  # Exact immutable snapshot already restore-verified.
                 check = capacity(repository.restore_directory or Path(tempfile.gettempdir()),
                                  restore_bytes, reserve_bytes)
@@ -126,12 +144,13 @@ def backup_cycle(source: Path, outbox: Path, repositories, *, reserve_bytes=2 * 
                     raise ValueError("backup acknowledgement changed identity")
                 state["receipts"][repository.name] = receipt
                 save_receipt(state_path, state)
+                confirmed.append(repository.name)
             except (OSError, RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
                 # Never expose Restic exception text or repository URLs.
                 failures.append({"repository": repository.name, "reason": type(exc).__name__})
         if failures:
             result = {"version": 1, "status": "partial", "snapshot": verified["snapshot"],
-                      "verified_destinations": sorted(state["receipts"]), "failures": failures}
+                      "verified_destinations": sorted(confirmed), "failures": failures}
         else:
             receipts = [state["receipts"][r.name] for r in repositories]
             result = {"version": 1, "status": "restore_verified", "receipts": receipts}
@@ -146,7 +165,9 @@ def backup_cycle(source: Path, outbox: Path, repositories, *, reserve_bytes=2 * 
             # Publish the complete receipt before reclaiming the one staging
             # generation. A crash before cleanup safely retries the same receipt.
             save_receipt(outbox / "latest.json", result)
-            shutil.rmtree(pending)
+            os.rename(pending, retired)
+            sync_directory(outbox)
+            shutil.rmtree(retired)
             sync_directory(outbox)
             result = {**result, "receipt": str(receipt_path)}
         return record(result, verified["publication"])

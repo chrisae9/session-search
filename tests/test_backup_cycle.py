@@ -100,7 +100,8 @@ def test_capacity_overlap_binding_and_interrupted_stage(tmp_path, monkeypatch):
         backup_cycle(catalog, tmp_path / 'other-outbox', repositories)
 
 
-def test_crash_after_complete_receipt_retries_without_new_snapshot(tmp_path, monkeypatch):
+@pytest.mark.parametrize("interruption", ["receipt", "cleanup"])
+def test_crash_after_complete_receipt_retries_without_new_snapshot(tmp_path, monkeypatch, interruption):
     _, catalog, repositories = setup(tmp_path)
     outbox = tmp_path / 'outbox'
     calls = []
@@ -121,21 +122,41 @@ def test_crash_after_complete_receipt_retries_without_new_snapshot(tmp_path, mon
     save = module.save_receipt
 
     def interrupted(path, value):
-        if path.name == 'latest.json':
+        if path.name == 'latest.json' and interruption == 'receipt':
             raise OSError('simulated publication interruption')
         save(path, value)
 
     monkeypatch.setattr(module, 'save_receipt', interrupted)
+    remove = module.shutil.rmtree
+
+    def interrupted_cleanup(path, *args, **kwargs):
+        if path.name == '.retired':
+            (path / 'manifest.json').unlink()
+            raise OSError('simulated cleanup interruption')
+        return remove(path, *args, **kwargs)
+
+    if interruption == 'cleanup':
+        monkeypatch.setattr(module.shutil, 'rmtree', interrupted_cleanup)
     with pytest.raises(OSError):
         backup_cycle(catalog, outbox, repositories)
     assert len(list((outbox / 'receipts').iterdir())) == 1
-    assert (outbox / 'pending').exists()
+    assert (outbox / ('pending' if interruption == 'receipt' else '.retired')).exists()
+    monkeypatch.setattr(module.shutil, 'rmtree', remove)
+    if interruption == 'cleanup':
+        # Resume cleanup, but do not admit another snapshot under low capacity.
+        monkeypatch.setattr(module, 'capacity', lambda *a: {'status': 'deferred', 'reason': 'capacity'})
     monkeypatch.setattr(module, 'save_receipt', save)
     result = backup_cycle(catalog, outbox, repositories)
-    assert result['status'] == 'restore_verified'
+    assert result['status'] == ('restore_verified' if interruption == 'receipt' else 'deferred')
     assert calls == ['one', 'two']
     assert not (outbox / 'pending').exists()
-    assert Path(result['receipt']).exists()
+    assert not (outbox / '.retired').exists()
+    if interruption == 'receipt':
+        assert Path(result['receipt']).exists()
+    else:
+        with Catalog(catalog, readonly=True) as c:
+            assert c.status()['backup']['verified_destinations'] == 0
+        assert (outbox / 'latest.json').exists()
 
 
 def test_backup_status_rejects_corrupt_or_unbounded_metadata(tmp_path):
@@ -163,3 +184,33 @@ def test_duplicate_repository_identity_never_completes_policy(tmp_path, monkeypa
     assert result["status"] == "partial"
     assert result["verified_destinations"] == ["one"]
     assert not (outbox / "latest.json").exists()
+
+
+def test_changed_repository_does_not_count_cached_verification(tmp_path, monkeypatch):
+    _, catalog, repositories = setup(tmp_path)
+    identities = {"one": "a" * 64, "two": "b" * 64}
+    unavailable = True
+
+    def run(self, args):
+        if self.name == "two" and unavailable:
+            raise RuntimeError("unavailable")
+        return json.dumps({"id": identities[self.name]})
+
+    def backup(self, path):
+        from session_search.storage.snapshots import verify_snapshot
+        return {"version": 1, "status": "restore_verified", "repository": self.name,
+                "repository_id": identities[self.name], "backup_id": "c" * 64,
+                "source_path": str(path), "snapshot": verify_snapshot(path)["snapshot"]}
+
+    monkeypatch.setattr(ResticRepository, "run", run)
+    monkeypatch.setattr(ResticRepository, "backup_and_verify", backup)
+    outbox = tmp_path / "outbox"
+    assert backup_cycle(catalog, outbox, repositories)["verified_destinations"] == ["one"]
+    unavailable = False
+    identities["one"] = "d" * 64
+    result = backup_cycle(catalog, outbox, repositories)
+    assert result["status"] == "partial"
+    assert result["verified_destinations"] == ["two"]
+    assert not (outbox / "latest.json").exists()
+    with Catalog(catalog, readonly=True) as c:
+        assert c.status()["backup"]["verified_destinations"] == 1
