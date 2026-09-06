@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from contextlib import nullcontext
@@ -17,6 +16,37 @@ from session_search.storage.catalog import Catalog
 def fingerprint(path: Path) -> str:
     stat = path.stat()
     return canonical_json([stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns])
+
+
+def copy_complete_records(path: Path, destination: Path) -> tuple[int, bool]:
+    """Copy the observed complete-record prefix with bounded byte buffers.
+
+    Syntax validation belongs to the parser's first pass. Searching backward for
+    the last newline avoids allocating a potentially huge unfinished image record.
+    """
+    chunk_size = 1024 * 1024
+    with path.open("rb") as source, destination.open("wb") as output:
+        size = os.fstat(source.fileno()).st_size
+        end = size
+        complete = 0
+        while end:
+            start = max(0, end - chunk_size)
+            source.seek(start)
+            block = source.read(end - start)
+            newline = block.rfind(b"\n")
+            if newline >= 0:
+                complete = start + newline + 1
+                break
+            end = start
+        source.seek(0)
+        remaining = complete
+        while remaining:
+            block = source.read(min(chunk_size, remaining))
+            if not block:
+                raise ValueError("source truncated while staging complete records")
+            output.write(block)
+            remaining -= len(block)
+    return complete, complete < size
 
 
 def normalize_session(parsed) -> SessionRevision:
@@ -74,25 +104,10 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
     partial_tail = False
     with tempfile.TemporaryDirectory(prefix="session-search-capture-") as staging:
         snapshot = Path(staging) / path.name
-        with path.open("rb") as source, snapshot.open("wb") as dest:
-            # Bound the snapshot to the size observed before reading an active writer.
-            remaining = os.fstat(source.fileno()).st_size
-            while remaining:
-                line = source.readline(remaining)
-                remaining -= len(line)
-                if not line:
-                    break
-                if not line.endswith(b"\n"):
-                    partial_tail = True
-                    break
-                obj = json.loads(line)
-                if not isinstance(obj, dict):
-                    raise ValueError("invalid Codex event envelope")
-                dest.write(line)
-                complete_bytes += len(line)
+        complete_bytes, partial_tail = copy_complete_records(path, snapshot)
         if fingerprint(path) != before:
             return {"status": "changed_during_read", "retryable": True}
-        parsed = CodexParser(session_index=Path(staging) / "no-index").parse_session(snapshot)
+        parsed = CodexParser(session_index=Path(staging) / "no-index", strict=True).parse_session(snapshot)
         if parsed.project_dir == staging:
             parsed.project_dir = str(path.parent)
         session = normalize_session(parsed)

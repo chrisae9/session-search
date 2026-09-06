@@ -428,8 +428,9 @@ class CodexParser(BaseParser):
 
     name = "codex"
 
-    def __init__(self, *, session_index=None):
+    def __init__(self, *, session_index=None, strict=False):
         self.session_index = session_index
+        self.strict = strict
 
     def detect(self) -> bool:
         return bool(_session_files())
@@ -493,7 +494,7 @@ class CodexParser(BaseParser):
         # first without retaining response payloads (including embedded images).
         metadata_keys = ("id", "session_id", "cwd", "source", "thread_source",
                          "parent_thread_id", "forked_from_id", "agent_path", "agent_nickname")
-        for line_number, obj in _iter_json_records(jsonl_path):
+        for line_number, obj in _iter_json_records(jsonl_path, strict=self.strict):
             if obj.get("type") == "session_meta":
                 payload = obj.get("payload", {})
                 session_metadata.append((line_number, {key: payload[key] for key in metadata_keys if key in payload}))
@@ -583,7 +584,7 @@ class CodexParser(BaseParser):
         turns = []
         current_turn = None
 
-        for line_number, obj in _iter_json_records(jsonl_path, after_line=boundary_line):
+        for line_number, obj in _iter_json_records(jsonl_path, after_line=boundary_line, strict=self.strict):
             if obj.get("type") != "response_item":
                 continue
             timestamp = obj.get("timestamp", "")
@@ -822,7 +823,7 @@ def _dedupe(values):
     return result
 
 
-def _iter_json_records(path, *, after_line=0):
+def _iter_json_records(path, *, after_line=0, strict=False):
     """Yield one decoded record at a time, preserving original line citations."""
     if after_line is None:
         return
@@ -833,9 +834,13 @@ def _iter_json_records(path, *, after_line=0):
             try:
                 value = json.loads(line)
             except json.JSONDecodeError:
+                if strict:
+                    raise ValueError("invalid Codex JSON record") from None
                 continue
             if isinstance(value, dict):
                 yield line_number, value
+            elif strict:
+                raise ValueError("invalid Codex event envelope")
 
 
 def _read_session_cwd(jsonl_path):
