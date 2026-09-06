@@ -38,6 +38,10 @@ class UploadQueue:
             CREATE TABLE IF NOT EXISTS raw_captures (
               path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, digest TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS raw_acknowledgements (
+              path TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, digest TEXT NOT NULL,
+              size INTEGER NOT NULL, session_id TEXT NOT NULL, revision TEXT NOT NULL
+            );
         """)
         path.chmod(0o600)
 
@@ -299,6 +303,17 @@ class UploadQueue:
                     self.db.execute("INSERT INTO acknowledged VALUES (?,?) ON CONFLICT(session_id) "
                                     "DO UPDATE SET revision=excluded.revision",
                                     (row["session_id"], row["revision"]))
+                    if payload.get('raw'):
+                        raw = payload['raw']
+                        # Retain exact recovery requirements in the same commit
+                        # that retires the acknowledged outbound payload.
+                        self.db.execute(
+                            'INSERT INTO raw_acknowledgements VALUES (?,?,?,?,?,?) ON CONFLICT(path) '
+                            'DO UPDATE SET fingerprint=excluded.fingerprint,digest=excluded.digest,'
+                            'size=excluded.size,session_id=excluded.session_id,revision=excluded.revision',
+                            (raw['path'], raw['fingerprint'], raw['digest'], raw['size'],
+                             row['session_id'], row['revision']),
+                        )
                     self.db.execute("DELETE FROM pending WHERE seq=?", (row["seq"],))
                 if payload.get("raw"):
                     with self.capture_guard():

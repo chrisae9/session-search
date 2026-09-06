@@ -139,6 +139,9 @@ def test_client_compaction_preserves_recovery_checkpoints_and_pending_work(tmp_p
         assert reopened.fingerprint(str(source)) == 'stable'
         assert reopened.has_raw(str(source), 'stable')
         assert reopened.db.execute('SELECT revision FROM acknowledged').fetchone()[0] == session.revision
+        assert dict(reopened.db.execute('SELECT * FROM raw_acknowledgements').fetchone()) == {
+            'path': str(source), 'fingerprint': 'stable', 'digest': raw['digest'], 'size': raw['size'],
+            'session_id': 'a', 'revision': session.revision}
         assert reopened.status()['pending'] == 0
         assert reopened.compact()['status'] == 'unchanged'
         # A later capture still chains to the acknowledged head after compaction.
@@ -146,3 +149,62 @@ def test_client_compaction_preserves_recovery_checkpoints_and_pending_work(tmp_p
         payload = json.loads(reopened.db.execute('SELECT payload FROM pending').fetchone()[0])
         assert payload['expected_revision'] == session.revision
         assert source.read_bytes() == b'synthetic original'
+
+
+def test_raw_acknowledgement_is_atomic_and_tracks_only_durable_revisions(tmp_path):
+    import sqlite3
+    from session_search.storage.objects import ObjectStore
+    root = tmp_path / 'client'
+    source = tmp_path / 'synthetic.jsonl'
+    source.write_bytes(b'first raw\n')
+    first_raw = {**ObjectStore(root).put(source), 'path': str(source), 'fingerprint': 'first'}
+    first = revision('a', 'first')
+    second = revision('a', 'second')
+
+    class Online:
+        def upload_raw(self, *args):
+            pass
+        def upload(self, payload):
+            text = payload['session']['events'][0]['text']
+            return {'status': 'durable', 'revision': first.revision if text == 'first' else second.revision}
+
+    with UploadQueue(root) as queue:
+        queue.ingest(first, producer='device', request_id='one',
+                     checkpoint=(str(source), 'first'), raw=first_raw)
+        assert queue.db.execute('SELECT COUNT(*) FROM raw_acknowledgements').fetchone()[0] == 0
+        queue.db.execute("CREATE TRIGGER fail_ack BEFORE INSERT ON raw_acknowledgements "
+                         "BEGIN SELECT RAISE(ABORT, 'synthetic interruption'); END")
+        queue.db.commit()
+        with pytest.raises(sqlite3.IntegrityError, match='interruption'):
+            queue.flush(Online())
+        assert queue.status()['pending'] == 1
+        assert queue.db.execute('SELECT COUNT(*) FROM acknowledged').fetchone()[0] == 0
+        queue.db.execute('DROP TRIGGER fail_ack')
+        queue.db.commit()
+        assert queue.flush(Online())['sent'] == 1
+        assert not ObjectStore(root).path(first_raw['digest']).exists()
+        source.write_bytes(b'second raw\n')
+        second_raw = {**ObjectStore(root).put(source), 'path': str(source), 'fingerprint': 'second'}
+        queue.ingest(second, producer='device', request_id='two',
+                     checkpoint=(str(source), 'second'), raw=second_raw)
+        # A newer capture is not a newer durable acknowledgement.
+        assert queue.db.execute('SELECT fingerprint FROM raw_acknowledgements').fetchone()[0] == 'first'
+    with UploadQueue(root) as reopened:
+        assert reopened.flush(Online())['sent'] == 1
+        assert dict(reopened.db.execute('SELECT * FROM raw_acknowledgements').fetchone()) == {
+            **second_raw, 'session_id': 'a', 'revision': second.revision}
+        assert reopened.status()['pending'] == 0
+        assert source.read_bytes() == b'second raw\n'
+
+
+def test_old_queue_does_not_invent_raw_acknowledgement(tmp_path):
+    with UploadQueue(tmp_path) as queue:
+        queue.db.execute("INSERT INTO captured VALUES ('old-path','old-fingerprint')")
+        queue.db.execute("INSERT INTO raw_captures VALUES ('old-path','old-fingerprint',?)", ('a' * 64,))
+        queue.db.execute("INSERT INTO acknowledged VALUES ('session',?)", ('b' * 64,))
+        queue.db.execute('DROP TABLE raw_acknowledgements')
+        queue.db.commit()
+    with UploadQueue(tmp_path) as reopened:
+        assert reopened.db.execute('SELECT COUNT(*) FROM raw_acknowledgements').fetchone()[0] == 0
+        assert reopened.has_raw('old-path', 'old-fingerprint')
+        assert reopened.db.execute('SELECT revision FROM acknowledged').fetchone()[0] == 'b' * 64
