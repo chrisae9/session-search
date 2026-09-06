@@ -9,7 +9,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Transactional canonical revisions and lexical retrieval.
 - [x] Persistent active-evidence lookup index avoids repeated temporary-index construction for keyword queries.
 - [x] Opt-in atomic literal substring index with transactional maintenance and scan fallback.
-- [ ] Live literal-index deployment and broader workload qualification.
+- [x] Pilot primary literal-index deployment with authenticated retrieval, citation expansion, and standby fallback checks.
+- [ ] Broader literal workload qualification and replica rollout.
 - [x] Shared immutable evidence records and compressed revision maps; unchanged text is not copied for each growing revision.
 - [x] Immutable bounded context and CLI.
 - [x] Durable upload queue and complete-record capture checkpoints.

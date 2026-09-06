@@ -264,4 +264,5 @@ tokenizers that stop at NUL without altering original evidence. Short
 or other queries without a usable triple use the scan path. Missing readiness,
 a missing maintenance trigger, unsupported tokenizer, or an evidence high-water
 mismatch also selects the scan path. It does not change keyword or hybrid ranking.
-The index has not yet been enabled on the live deployment.
+The pilot primary has the index enabled; its standby still uses the scan path.
+Broader workload and replica qualification remain outstanding.
