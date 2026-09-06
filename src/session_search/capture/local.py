@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 
 from session_search.capture.parsers.base import redact_sensitive_text
@@ -53,6 +54,13 @@ def normalize_session(parsed) -> SessionRevision:
 
 
 def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False) -> dict:
+    # A lightweight client's staging copy must survive until its queue record is
+    # committed, even when another process finishes uploading the same object.
+    with getattr(catalog, "capture_guard", nullcontext)():
+        return _capture_file(catalog, path, producer, archive_raw=archive_raw)
+
+
+def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False) -> dict:
     path = path.resolve()
     before = fingerprint(path)
     if catalog.fingerprint(str(path)) == before:

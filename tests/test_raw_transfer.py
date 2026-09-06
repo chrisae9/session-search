@@ -134,3 +134,42 @@ def test_large_normalized_upload_recovers_lost_ack_without_raw_archival(tmp_path
         assert "finalmarker" in context["results"][0]["events"][0]["text"]
     assert not (root / "objects/raw").exists()
     assert not [p for p in (root / "objects/revision-upload").rglob("*") if p.is_file()]
+
+
+def test_ack_cleanup_cannot_remove_an_object_being_recaptured(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event as Signal
+    from session_search.core.records import Event, SessionRevision
+
+    root = tmp_path / 'client'
+    source = tmp_path / 'source.jsonl'
+    source.write_text(rollout('synthetic raw evidence'))
+    raw = {**ObjectStore(root).put(source), 'path': str(source), 'fingerprint': 'synthetic'}
+    session = SessionRevision('s', (Event('e', 'user', 'synthetic raw evidence'),))
+    uploaded = Signal()
+
+    class Online:
+        def upload_raw(self, path, digest):
+            assert path.read_bytes() == source.read_bytes()
+
+        def upload(self, payload):
+            uploaded.set()
+            return {'status': 'durable', 'revision': session.revision}
+
+    def flush():
+        with UploadQueue(root) as worker:
+            return worker.flush(Online())
+
+    with ThreadPoolExecutor(max_workers=1) as pool, UploadQueue(root) as queue:
+        queue.ingest(session, producer='d', request_id='first', raw=raw)
+        with queue.capture_guard():
+            future = pool.submit(flush)
+            assert uploaded.wait(timeout=5)
+            # Capture has reused the object but has not yet committed its queue
+            # record. Acknowledgement cleanup must wait for this critical section.
+            queue.ingest(session, producer='d', request_id='recaptured', raw=raw)
+        assert future.result(timeout=5)['sent'] == 1
+        assert ObjectStore(root).path(raw['digest']).exists()
+        assert queue.flush(Online())['sent'] == 1
+        assert not ObjectStore(root).path(raw['digest']).exists()
+        assert source.exists()

@@ -5,6 +5,7 @@ import fcntl
 import sqlite3
 import time
 from dataclasses import asdict
+from contextlib import contextmanager
 from pathlib import Path
 
 from session_search.core.records import SessionRevision, canonical_json
@@ -90,6 +91,12 @@ class UploadQueue:
         return self.db.execute("SELECT 1 FROM raw_captures WHERE path=? AND fingerprint=?",
                                (path, fingerprint)).fetchone() is not None
 
+    @contextmanager
+    def capture_guard(self):
+        with (self.root / ".capture.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
     def flush(self, client: Client, *, limit: int = 100, now: float | None = None,
               bootstrap_imports: bool = False) -> dict:
         if not 1 <= limit <= 1000:
@@ -158,17 +165,17 @@ class UploadQueue:
                                     (row["session_id"], row["revision"]))
                     self.db.execute("DELETE FROM pending WHERE seq=?", (row["seq"],))
                 if payload.get("raw"):
-                    still_pending = self.db.execute(
-                        "SELECT 1 FROM pending WHERE json_extract(payload,'$.raw.digest')=? LIMIT 1",
-                        (payload["raw"]["digest"],),
-                    ).fetchone()
-                    if not still_pending:
-                        # This is only the transfer staging copy. Native Codex
-                        # files remain untouched until separately verified offload.
-                        try:
-                            ObjectStore(self.root).path(payload["raw"]["digest"]).unlink(missing_ok=True)
-                        except OSError:
-                            pass  # Retaining an extra cache copy is safe; retry GC later.
+                    with self.capture_guard():
+                        still_pending = self.db.execute(
+                            "SELECT 1 FROM pending WHERE json_extract(payload,'$.raw.digest')=? LIMIT 1",
+                            (payload["raw"]["digest"],),
+                        ).fetchone()
+                        if not still_pending:
+                            # Only the transfer copy; native files remain untouched.
+                            try:
+                                ObjectStore(self.root).path(payload["raw"]["digest"]).unlink(missing_ok=True)
+                            except OSError:
+                                pass  # Retaining an extra cache copy is safe; retry GC later.
                 sent += 1
             except RemoteError as exc:
                 state = "conflict" if exc.status == 409 else "pending"
