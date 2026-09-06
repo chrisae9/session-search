@@ -30,7 +30,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
-- [ ] Incremental parsing of appended records without reparsing the changed session.
+- [x] Incremental parser engine with complete-prefix verification, original line boundaries, and ownership-change fallback.
+- [ ] Durable bounded parser checkpoints and integration into recurring capture.
 - [x] Chunk-backed catalog acknowledgement, version 2 snapshots, dual Restic restoration, and replacement-primary preparation.
 - [x] Opt-in server raw-upload chunking with the existing client protocol, shared-prefix reuse, and publication retry recovery.
 - [x] Opt-in local-only capture into shared raw chunks.

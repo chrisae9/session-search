@@ -482,9 +482,12 @@ class CodexParser(BaseParser):
 
         return files_to_process, current_keys, unchanged_keys
 
-    def parse_session(self, jsonl_path) -> ParsedSession:
+    def parse_session(self, jsonl_path, *, _metadata_records=None, _resume=None) -> ParsedSession:
         native_session_id = _session_id_from_path(jsonl_path)
         session_metadata = []
+        self.scan_metadata = []
+        self.scan_ownership = None
+        self.resumed = False
         trigger_line = None
         task_starts = []
         boundary_line = 0
@@ -494,16 +497,25 @@ class CodexParser(BaseParser):
         # first without retaining response payloads (including embedded images).
         metadata_keys = ("id", "session_id", "cwd", "source", "thread_source",
                          "parent_thread_id", "forked_from_id", "agent_path", "agent_nickname")
-        for line_number, obj in _iter_json_records(jsonl_path, strict=self.strict):
+        metadata_records = (_iter_json_records(jsonl_path, strict=self.strict)
+                            if _metadata_records is None else _metadata_records)
+        for line_number, obj in metadata_records:
             if obj.get("type") == "session_meta":
                 payload = obj.get("payload", {})
-                session_metadata.append((line_number, {key: payload[key] for key in metadata_keys if key in payload}))
+                selected = {key: payload[key] for key in metadata_keys if key in payload}
+                session_metadata.append((line_number, selected))
+                self.scan_metadata.append((line_number, {"type": "session_meta", "payload": selected}))
             elif (obj.get("type") == "inter_agent_communication_metadata"
                     and obj.get("payload", {}).get("trigger_turn") and trigger_line is None):
                 trigger_line = line_number
+                self.scan_metadata.append((line_number, {
+                    "type": "inter_agent_communication_metadata", "payload": {"trigger_turn": True}}))
             elif (obj.get("type") == "event_msg"
                     and obj.get("payload", {}).get("type") == "task_started"):
-                task_starts.append((line_number, obj.get("payload", {}).get("turn_id")))
+                turn_id = obj.get("payload", {}).get("turn_id")
+                task_starts.append((line_number, turn_id))
+                self.scan_metadata.append((line_number, {"type": "event_msg",
+                    "payload": {"type": "task_started", "turn_id": turn_id}}))
         obj = None  # Release the final decoded response before the second pass.
 
         matching_metadata = next((
@@ -581,10 +593,17 @@ class CodexParser(BaseParser):
                         boundary_line = trigger_line
                 authoritative_empty = boundary_line is None
 
+        self.scan_ownership = json.dumps(
+            [native_session_id, matching_metadata, boundary_line, is_subagent,
+             parent_session_id, authoritative_empty], sort_keys=True)
+        self.resumed = bool(_resume and _resume["ownership"] == self.scan_ownership)
+        response_options = ({"start_offset": _resume["offset"], "start_line": _resume["line"] - 1}
+                            if self.resumed else {})
         turns = []
         current_turn = None
 
-        for line_number, obj in _iter_json_records(jsonl_path, after_line=boundary_line, strict=self.strict):
+        for line_number, obj in _iter_json_records(
+                jsonl_path, after_line=boundary_line, strict=self.strict, **response_options):
             if obj.get("type") != "response_item":
                 continue
             timestamp = obj.get("timestamp", "")
@@ -823,12 +842,13 @@ def _dedupe(values):
     return result
 
 
-def _iter_json_records(path, *, after_line=0, strict=False):
+def _iter_json_records(path, *, after_line=0, strict=False, start_offset=0, start_line=0):
     """Yield one decoded record at a time, preserving original line citations."""
     if after_line is None:
         return
     with open(path) as stream:
-        for line_number, line in enumerate(stream, start=1):
+        stream.seek(start_offset)
+        for line_number, line in enumerate(stream, start=start_line + 1):
             if line_number <= after_line:
                 continue
             try:
