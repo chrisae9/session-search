@@ -30,3 +30,19 @@ def test_missing_invalid_and_symlink_receipts_do_not_bootstrap(tmp_path):
     path.symlink_to(target)
     assert capture_status(tmp_path) == {'status': 'unavailable'}
     assert target.read_text() == 'private'
+
+
+def test_parser_work_summary_excludes_details_and_rejects_invalid_counts(tmp_path):
+    receipt = {'version': 1, 'status': 'complete', 'completed_at': '2026-09-06T00:00:00+00:00',
+               'capture': {'parser': {'full': 1, 'incremental': 2, 'reused_events': 30,
+                                      'checkpoints_saved': 3, 'path': 'private'}}}
+    path = tmp_path / 'sync-status.json'
+    path.write_text(json.dumps(receipt))
+    result = capture_status(tmp_path)
+    assert result['parser'] == {'full': 1, 'incremental': 2, 'reused_events': 30,
+                                'checkpoints_saved': 3}
+    assert 'private' not in json.dumps(result)
+    for invalid in (-1, True, 'private'):
+        receipt['capture']['parser']['reused_events'] = invalid
+        path.write_text(json.dumps(receipt))
+        assert capture_status(tmp_path) == {'status': 'unavailable'}

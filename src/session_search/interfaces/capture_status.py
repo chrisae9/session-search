@@ -29,9 +29,19 @@ def capture_status(root: Path) -> dict:
         errors = capture.get('errors', [])
         if not isinstance(errors, list):
             raise ValueError('invalid capture errors')
-        return {'status': value['status'], 'completed_at': completed.isoformat(),
+        result = {'status': value['status'], 'completed_at': completed.isoformat(),
                 'counts': summary, 'capture_error_count': len(errors),
                 'backlog_deferred': capture.get('reason') == 'backlog_byte_budget'}
+        if 'parser' in capture:
+            parser = capture['parser']
+            if not isinstance(parser, dict):
+                raise ValueError('invalid parser summary')
+            selected = {key: parser[key] for key in
+                        ('full', 'incremental', 'reused_events', 'checkpoints_saved') if key in parser}
+            if any(type(count) is not int or count < 0 for count in selected.values()):
+                raise ValueError('invalid parser counts')
+            result['parser'] = selected
+        return result
     except FileNotFoundError:
         return {'status': 'not_observed'}
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
