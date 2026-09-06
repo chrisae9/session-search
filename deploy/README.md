@@ -58,3 +58,50 @@ This timer only replicates searchable evidence. Credential propagation, capture 
 The primary can install `session-search-embed.service` and its timer alongside replication. Provide a private `embedding.env` containing `SESSION_SEARCH_DATA`, `SESSION_SEARCH_EMBEDDING_CONFIG`, and `SESSION_SEARCH_EMBEDDING_BATCH` (1–10000). The model configuration must identify the explicitly provisioned remote embedding service. This data-host unit does not download or start a model.
 
 Each run indexes a bounded batch, then requests replication. The timer waits 30 seconds between completed runs. A process-shared catalog lock permits only one background indexer at a time; query embeddings bypass it. Three consecutive provider failures end the batch early, leaving the remaining evidence pending. Standbys cannot run this worker. For local-only installations, use the local provider directly without this remote-model service unit.
+
+## Recurring capture
+
+`sync` runs one capture cycle under a nonblocking process lock. Remote mode flushes
+first, then admits capture within `--max-bytes` and the remaining
+`--max-pending-bytes` allowance, and flushes again. The backlog calculation counts
+logical raw bytes without a chunk-sharing discount, or serialized payload bytes
+for normalized-only uploads. It is an admission threshold, not a filesystem quota;
+normalized payload expansion and independent manual capture can exceed it. The
+capture free-space preflight remains active. An unavailable primary retains queued
+work and its retry schedule; the standby never receives writes.
+
+Choose a capture budget that accommodates the largest session you need to ingest.
+A file above that budget stays deferred on every run until the budget is raised.
+`sync` does not embed, replicate, back up, or remove native files. Inspect its JSON
+coverage and queue results during a manual run before installing a scheduler.
+Each completed cycle atomically records its timestamp and result in the private
+`sync-status.json` file in its data directory; overlapping attempts do not replace
+the last completed result.
+
+Linux clients can install `systemd/session-search-sync.service` and its timer.
+Create a private `sync.env` beside the other configuration files:
+
+```text
+SESSION_SEARCH_DATA=/absolute/client/data
+SESSION_SEARCH_PRIMARY=https://primary.example
+SESSION_SEARCH_TOKEN_FILE=/absolute/config/device.token
+SESSION_SEARCH_CODEX_HOME=/absolute/codex/home
+SESSION_SEARCH_PRODUCER=unique-device-id
+SESSION_SEARCH_CAPTURE_BYTES=8589934592
+SESSION_SEARCH_BACKLOG_BYTES=17179869184
+SESSION_SEARCH_RESERVE_BYTES=2147483648
+```
+
+After the manual cycle succeeds, reload the user service manager and enable
+`session-search-sync.timer`. It waits five minutes after each completed run.
+
+For macOS, customize every path, endpoint, device identity, and byte allowance in
+`launchd/session-search-sync.plist`, then place it in the user's `Library/LaunchAgents`
+directory. Validate it with `plutil -lint` before loading it with `launchctl bootstrap`
+into the user's GUI domain. The template runs at load and every five minutes while
+the user agent is loaded. Keep the token in its private file, never in the plist.
+
+For a local-only computer, omit `--primary`, `--token-file`, and
+`--max-pending-bytes` from the scheduled command. `sync` then captures into its local
+catalog without network operations. A local catalog and a client upload queue must
+use different data directories.

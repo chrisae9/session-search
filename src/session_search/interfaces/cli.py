@@ -118,6 +118,16 @@ def parser() -> argparse.ArgumentParser:
                          help="free-space reserve after estimated capture staging")
     capture.add_argument("--force", action="store_true",
                          help="explicit recovery: recapture files even when checkpoints match")
+    sync = commands.add_parser("sync", help="one bounded background capture and flush cycle")
+    sync.add_argument("--codex-home", type=Path,
+                      default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
+    sync.add_argument("--producer", required=True)
+    sync.add_argument("--max-bytes", type=int, required=True)
+    sync.add_argument("--max-pending-bytes", type=int)
+    sync.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
+    sync.add_argument("--archive-raw", action="store_true")
+    sync.add_argument("--chunk-raw", action="store_true")
+    sync.add_argument("--flush-limit", type=int, default=100)
     search = commands.add_parser("search", help="retrieve cited evidence")
     search.add_argument("query")
     search.add_argument("--literal", action="store_true")
@@ -264,6 +274,14 @@ def main(argv=None) -> int:
             from session_search.storage.semantic import index_pending
             with Catalog(args.data_dir.resolve()) as catalog:
                 output = index_pending(catalog, provider, limit=args.limit)
+            print(canonical_json(output))
+            return 0
+        if args.command == "sync":
+            from session_search.capture.sync import sync_once
+            output = sync_once(args.data_dir, args.codex_home, args.producer, client=client,
+                               max_bytes=args.max_bytes, max_pending_bytes=args.max_pending_bytes,
+                               reserve_bytes=args.reserve_bytes, archive_raw=args.archive_raw,
+                               chunk_raw=args.chunk_raw, flush_limit=args.flush_limit)
             print(canonical_json(output))
             return 0
         if args.command == "flush":

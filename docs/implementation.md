@@ -41,7 +41,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Explicit replacement-primary preparation from exact recovery snapshots, with a new publication identity and preserved evidence.
 - [x] Cooperative local primary write fencing with active-writer detection and preserved read access.
 - [x] Raw-prefix checkpoint reconciliation and forced recapture after client loss or an older primary restore.
-- [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
+- [x] Bounded sync cycles with backlog admission, overlap prevention, and Linux/macOS scheduling templates.
+- [ ] Live recurring capture rollout, global embedding admission control, and bounded archival maintenance retention.
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
 - [ ] Offline local-inference installation, quality/performance evaluations, and migration.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
