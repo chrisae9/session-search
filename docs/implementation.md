@@ -17,6 +17,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Explicit search-only replicas, excluded from recovery/offload backup inputs.
 - [x] Resumable SSH snapshot publication, unchanged-publication skipping, and five-minute timer templates.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
+- [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.

@@ -120,6 +120,8 @@ class Catalog:
 
     def _open(self):
         readonly = self.readonly
+        if not readonly and (self.root / "manifest.json").exists():
+            raise PermissionError("verified snapshots are read-only; prepare a replacement primary explicitly")
         path = self.root / "catalog.sqlite3"
         if readonly:
             self.db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=10)

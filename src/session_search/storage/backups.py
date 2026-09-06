@@ -3,11 +3,15 @@
 import json
 import subprocess
 import tempfile
+import os
+import re
+import fcntl
 from dataclasses import dataclass
 from pathlib import Path
 
 from session_search.core.records import canonical_json
 from session_search.storage.snapshots import verify_snapshot
+from session_search.storage.objects import sync_directory
 
 
 @dataclass(frozen=True)
@@ -70,6 +74,50 @@ def load_repositories(path: Path) -> list[ResticRepository]:
     if len({repo.name for repo in repositories}) != len(repositories):
         raise ValueError("backup repository names must be unique")
     return repositories
+
+
+def restore_backup(repository: ResticRepository, receipt: dict, destination: Path) -> dict:
+    """Retain one freshly verified recovery snapshot without enabling a writer."""
+    if receipt.get("version") != 1 or receipt.get("status") != "restore_verified":
+        raise ValueError("a verified version 1 backup receipt is required")
+    if receipt.get("repository") != repository.name:
+        raise ValueError("receipt belongs to another repository")
+    for field in ("repository_id", "backup_id", "snapshot"):
+        if not isinstance(receipt.get(field), str) or not re.fullmatch("[0-9a-f]{64}", receipt[field]):
+            raise ValueError("invalid backup receipt identity")
+    source = Path(receipt.get("source_path", ""))
+    if not source.is_absolute() or ".." in source.parts or source == Path("/"):
+        raise ValueError("invalid backup source path")
+    destination = destination.absolute()
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (destination.parent / ".restore.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError("restore destination already exists")
+        config = json.loads(repository.run(["cat", "config"]))
+        if config.get("id") != receipt["repository_id"]:
+            raise ValueError("backup repository identity changed")
+        # Stage beside the destination so publication is a rename, not another
+        # full copy. Failure leaves the destination absent and the backup intact.
+        with tempfile.TemporaryDirectory(prefix=".restore-", dir=destination.parent) as temporary:
+            repository.run(["restore", receipt["backup_id"], "--target", temporary])
+            restored = Path(temporary) / str(source).lstrip("/")
+            result = verify_snapshot(restored)
+            if result["purpose"] != "recovery" or result["snapshot"] != receipt["snapshot"]:
+                raise ValueError("restored snapshot differs from the required recovery evidence")
+            for path in restored.rglob("*"):
+                if path.is_file():
+                    with path.open("rb") as stream:
+                        os.fsync(stream.fileno())
+            for path in sorted(restored.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if path.is_dir():
+                    sync_directory(path)
+            sync_directory(restored)
+            if destination.exists() or destination.is_symlink():
+                raise FileExistsError("restore destination already exists")
+            os.rename(restored, destination)
+            sync_directory(destination.parent)
+    return {**result, "repository": repository.name, "writable": False}
 
 
 def backup_all(snapshot: Path, repositories: list[ResticRepository], receipt_path: Path) -> dict:

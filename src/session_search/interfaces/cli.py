@@ -53,6 +53,11 @@ def parser() -> argparse.ArgumentParser:
     backup.add_argument("snapshot", type=Path)
     backup.add_argument("--repositories", type=Path, required=True)
     backup.add_argument("--receipt", type=Path, required=True)
+    restore = commands.add_parser("restore-backup", help="retain an exact verified read-only recovery snapshot")
+    restore.add_argument("destination", type=Path)
+    restore.add_argument("--repositories", type=Path, required=True)
+    restore.add_argument("--repository", required=True)
+    restore.add_argument("--receipt", type=Path, required=True)
     offload = commands.add_parser("plan-offload", help="write a reviewable manual offload plan")
     offload.add_argument("--receipt", type=Path, required=True)
     offload.add_argument("--output", type=Path, required=True)
@@ -117,13 +122,21 @@ def main(argv=None) -> int:
         client = Client(args.primary, args.token_file, standby=args.standby) if args.primary else None
         from session_search.core.embeddings import load_provider
         provider = load_provider(args.embedding_config, allow_remote=args.allow_remote_embeddings)
-        if args.command in {"backup", "plan-offload", "apply-offload"}:
+        if args.command in {"backup", "restore-backup", "plan-offload", "apply-offload"}:
             if client:
                 raise ValueError("backup and offload administration runs on the data host")
-            from session_search.storage.backups import backup_all, load_repositories
+            from session_search.storage.backups import backup_all, load_repositories, restore_backup
             from session_search.storage.offload import apply_offload, plan_offload
             if args.command == "backup":
                 output = backup_all(args.snapshot, load_repositories(args.repositories), args.receipt)
+            elif args.command == "restore-backup":
+                repositories = [r for r in load_repositories(args.repositories) if r.name == args.repository]
+                receipt = json.loads(args.receipt.read_text())
+                receipts = receipt.get("receipts", [receipt])
+                matches = [r for r in receipts if r.get("repository") == args.repository]
+                if len(repositories) != 1 or len(matches) != 1:
+                    raise ValueError("select exactly one configured repository and matching receipt")
+                output = restore_backup(repositories[0], matches[0], args.destination)
             elif args.command == "plan-offload":
                 with Catalog(args.data_dir.resolve(), readonly=True) as catalog:
                     output = plan_offload(catalog, args.receipt)

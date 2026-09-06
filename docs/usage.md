@@ -68,4 +68,16 @@ SSH replication consumes its verified incoming directory during activation, avoi
 
 Set each repository's optional `restore_directory` to an existing scratch directory with room for the complete uncompressed restore. Restore verification runs on the invoking data host, even when the repository is remote. Do not size this directory from the compressed backup size.
 
+To keep a recovered snapshot for inspection, select one repository from a saved receipt:
+
+```sh
+session-search restore-backup recovered-snapshot \
+  --repositories repositories.json --repository backup-one --receipt receipt.json
+session-search --data-dir recovered-snapshot search "recovery"
+```
+
+The destination must not exist. Recovery checks the repository identity, restores the exact backup ID, and verifies all referenced evidence against the receipt before publishing the destination. Reserve uncompressed restore space beside that destination. Both combined two-repository receipts and individual repository receipts are accepted; restoring one repository does not establish two-repository offload safety.
+
+Snapshots reject capture, ingestion, and embedding writes. This command does not promote a standby, enable a server, or fence an old primary. Replacement-writer preparation and fencing remain a separate recovery requirement.
+
 `plan-offload` produces a reviewable candidate plan. `apply-offload` requires that plan's ID, re-restores both backups, checks exact revision coverage, and refuses to run while Codex writers are detected. These primitives are tested with synthetic data; complete the deployment and migration gates before using them on retained personal sessions.
