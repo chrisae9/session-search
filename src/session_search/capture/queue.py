@@ -141,9 +141,60 @@ class UploadQueue:
             bootstrapped = self._bootstrap_imports(client, limit) if bootstrap_imports else 0
             reconciled = self._reconcile_raw_prefixes(client, limit) if reconcile_raw_prefixes else 0
             result = self._flush(client, limit=limit, now=now)
+            with self.capture_guard():
+                try:
+                    result["chunk_cleanup"] = self._prune_chunk_staging()
+                except (OSError, ValueError):
+                    result["chunk_cleanup"] = {"status": "deferred"}
             result["bootstrapped"] = bootstrapped
             result["reconciled"] = reconciled
             return result
+
+    def _prune_chunk_staging(self) -> dict:
+        """Caller holds flush and capture locks; only outbound staging is disposable."""
+        from session_search.storage.chunks import ChunkStore
+        from session_search.storage.objects import ObjectStore, sync_directory
+        if (self.root / "catalog.sqlite3").exists():
+            raise ValueError("client cleanup cannot run beside a search catalog")
+        chunks = ChunkStore(self.root)
+        # Validate every managed path before any removal. Unexpected layouts or
+        # corrupt recipes defer cleanup, preserving evidence for inspection.
+        members = {}
+        for kind in ("recipes", "chunks"):
+            directory = chunks.path(kind, "0" * 64).parent.parent
+            members[kind] = {}
+            if not directory.exists():
+                continue
+            for bucket in directory.iterdir():
+                if bucket.is_symlink() or not bucket.is_dir():
+                    raise ValueError("unexpected staging directory")
+                for path in bucket.iterdir():
+                    key = bucket.name + path.name
+                    if chunks.path(kind, key) != path or not path.is_file():
+                        raise ValueError("unexpected staging member")
+                    members[kind][key] = path
+        recipes = {key: chunks.recipe(key) for key in members["recipes"]}
+        pending = {row[0] for row in self.db.execute(
+            "SELECT DISTINCT json_extract(payload,'$.raw.digest') FROM pending "
+            "WHERE json_type(payload,'$.raw')='object'")}
+        retained = set()
+        for key in pending:
+            if key in recipes:
+                retained.update(chunk["digest"] for chunk in recipes[key]["chunks"])
+            elif ObjectStore(self.root).layout(key) != "file":
+                raise ValueError("pending raw staging is unavailable")
+        if not retained <= members["chunks"].keys():
+            raise ValueError("pending raw chunks are unavailable")
+        removed = 0
+        # Publish recipe removals before deleting their now-unreferenced chunks.
+        # An interrupted cleanup can safely repeat from the durable queue roots.
+        for kind, keep in (("recipes", pending), ("chunks", retained)):
+            for key, path in members[kind].items():
+                if key not in keep:
+                    path.unlink()
+                    sync_directory(path.parent)
+                    removed += 1
+        return {"status": "complete", "removed_members": removed}
 
     def _reconcile_raw_prefixes(self, client: Client, limit: int) -> int:
         import hashlib

@@ -15,7 +15,7 @@ Capture defaults to the configured Codex home; `--codex-home` selects a differen
 
 Pass the returned citation objects unchanged to `context` as a JSON array. Search excludes the active Codex thread tree when `CODEX_THREAD_ID` is available. `--literal` bypasses embeddings; role, project, session, producer, and time filters remain strict.
 
-Add `--archive-raw` to capture only when exact raw files should be retained. Raw files may contain content omitted or redacted from search evidence. Lightweight clients stage these files and upload resumable chunks before submitting their normalized revision. Acknowledgement reclaims the client transfer copy, while the original Codex file remains in place. On the server, completion publishes the verified staging inode with an exclusive hard link and durable directory updates, then removes its staging name. This avoids a second full-file allocation during completion; staging and object storage must share a filesystem. With default server settings, successive changed raw revisions are still separate archived files. `serve --chunk-raw` stores new raw uploads as shared 4 MiB chunks instead, preserving the original full-file digest and the existing client protocol. Identical chunks are verified and reused without rewriting them. Existing whole-file archives remain readable and are not automatically converted or deleted. Local-only capture supports `capture --archive-raw --chunk-raw`. Clients still stage and transmit the whole changed file. Changing this option does not convert existing archives or recapture unchanged files.
+Add `--archive-raw` to capture only when exact raw files should be retained. Raw files may contain content omitted or redacted from search evidence. Lightweight clients stage these files and upload resumable chunks before submitting their normalized revision. Acknowledgement reclaims the client transfer copy, while the original Codex file remains in place. On the server, completion publishes the verified staging inode with an exclusive hard link and durable directory updates, then removes its staging name. This avoids a second full-file allocation during completion; staging and object storage must share a filesystem. With default server settings, successive changed raw revisions are still separate archived files. `serve --chunk-raw` stores new raw uploads as shared 4 MiB chunks instead, preserving the original full-file digest and the existing client protocol. Identical chunks are verified and reused without rewriting them. Existing whole-file archives remain readable and are not automatically converted or deleted. Both local-only and client capture support `capture --archive-raw --chunk-raw`. Clients stream the reconstructed bytes directly from shared staging chunks using the existing resumable upload protocol. They still read and transmit the whole changed file on a new upload. Changing this option does not convert existing archives or recapture unchanged files.
 
 ## Agent interface
 
@@ -119,9 +119,15 @@ older snapshot verifiers reject that version. Whole-file snapshots retain versio
 current code reads both. Raw-file identities remain hashes of the complete
 original bytes. Backup and replacement-primary preparation preserve shared chunks
 and verify every reconstructed file. Enable it with `serve --chunk-raw` for uploads
-or `capture --archive-raw --chunk-raw` for local-only capture. Client staging
-continues to use whole files. Upgrade recovery tools
+or `capture --archive-raw --chunk-raw` for local or client capture. Upgrade recovery tools
 before enabling chunk-backed archival; it is not yet the live deployment default.
+
+Client `flush` removes unreferenced staging recipes and chunks after reading all
+pending upload references under the capture lock. Conflicted and rejected work
+retains its chunks. Interrupted cleanup repeats on a later flush; missing recipes,
+corruption, or unexpected storage paths defer cleanup. This applies only to client
+transfer copies, never native sessions or server archives. Local archival chunks
+remain retained; automatic archival retention is not implemented.
 
 For a space-constrained search standby, `snapshot DESTINATION --search-only` keeps all normalized revisions, citations, and search indexes while excluding raw objects and their recovery references. The snapshot declares its purpose as `search-replica`; recovery backup commands reject it. Use the default complete snapshot for raw-file recovery and offload verification.
 

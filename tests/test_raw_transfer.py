@@ -60,13 +60,8 @@ def test_remote_raw_capture_queues_exact_file_and_acknowledges_after_upload(tmp_
     source = tmp_path / "example.jsonl"
     source.write_text(rollout("exact raw upload"))
     with UploadQueue(tmp_path / "client") as queue:
-        capture_file(queue, source, "device", archive_raw=True)
+        capture_file(queue, source, "device", archive_raw=True, chunk_raw=chunk_staging)
         assert queue.status()["pending"] == 1
-        if chunk_staging:
-            # Exercise the storage reader independently of the capture flag,
-            # which remains disabled until shared staging cleanup is available.
-            raw = ObjectStore(queue.root).put(source, chunked=True)
-            ObjectStore(queue.root).path(raw['digest']).unlink()
         assert queue.flush(client)["sent"] == 1
     with Catalog(server_root, readonly=True) as catalog:
         row = catalog.db.execute("SELECT digest FROM raw_sources").fetchone()

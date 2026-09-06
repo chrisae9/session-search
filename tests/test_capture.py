@@ -146,7 +146,7 @@ def test_local_chunk_capture_preserves_raw_tail_and_snapshot(tmp_path):
         assert catalog.context([citation])["results"][0]["events"][0]["text"] == "chunk recovery evidence"
 
 
-def test_chunk_capture_rejects_invalid_modes_even_without_sessions(tmp_path):
+def test_chunk_capture_requires_raw_archival_even_without_sessions(tmp_path):
     import pytest
     from session_search.capture.queue import UploadQueue
 
@@ -154,6 +154,6 @@ def test_chunk_capture_rejects_invalid_modes_even_without_sessions(tmp_path):
         with pytest.raises(ValueError, match="requires archive_raw"):
             capture_home(catalog, tmp_path / "absent", "device", chunk_raw=True)
     with UploadQueue(tmp_path / "queue") as queue:
-        with pytest.raises(ValueError, match="local-only"):
-            capture_home(queue, tmp_path / "absent", "device", archive_raw=True, chunk_raw=True)
+        with pytest.raises(ValueError, match="requires archive_raw"):
+            capture_home(queue, tmp_path / "absent", "device", chunk_raw=True)
         assert not list((queue.root / "objects").glob("**/recipes/*/*"))

@@ -86,8 +86,6 @@ def normalize_session(parsed) -> SessionRevision:
 def _validate_raw_options(catalog, archive_raw: bool, chunk_raw: bool) -> None:
     if chunk_raw and not archive_raw:
         raise ValueError("chunked raw capture requires archive_raw")
-    if chunk_raw and not isinstance(catalog, Catalog):
-        raise ValueError("chunked raw capture requires local-only mode; use serve --chunk-raw remotely")
 
 
 def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,

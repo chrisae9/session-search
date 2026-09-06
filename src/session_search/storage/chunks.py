@@ -1,4 +1,4 @@
-"""Exact raw-file recipes over immutable shared chunks; not yet a capture backend."""
+"""Exact raw-file recipes over immutable shared chunks."""
 
 import hashlib
 import json

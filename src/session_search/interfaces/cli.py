@@ -111,7 +111,7 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--archive-raw", action="store_true",
                          help="explicitly retain exact raw session files in this local catalog")
     capture.add_argument("--chunk-raw", action="store_true",
-                         help="local-only: share raw chunks; requires --archive-raw")
+                         help="share raw archival or staging chunks; requires --archive-raw")
     capture.add_argument("--force", action="store_true",
                          help="explicit recovery: recapture files even when checkpoints match")
     search = commands.add_parser("search", help="retrieve cited evidence")
