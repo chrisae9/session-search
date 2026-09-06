@@ -17,6 +17,17 @@ Pass the returned citation objects unchanged to `context` as a JSON array. Searc
 
 Add `--archive-raw` to capture only when exact raw files should be retained. Raw files may contain content omitted or redacted from search evidence. Lightweight clients stage these files and upload resumable chunks before submitting their normalized revision. Acknowledgement reclaims the client transfer copy, while the original Codex file remains in place. On the server, completion publishes the verified staging inode with an exclusive hard link and durable directory updates, then removes its staging name. This avoids a second full-file allocation during completion; staging and object storage must share a filesystem. With default server settings, successive changed raw revisions are still separate archived files. `serve --chunk-raw` stores new raw uploads as shared 4 MiB chunks instead, preserving the original full-file digest and the existing client protocol. Identical chunks are verified and reused without rewriting them. Existing whole-file archives remain readable and are not automatically converted or deleted. Both local-only and client capture support `capture --archive-raw --chunk-raw`. Clients stream the reconstructed bytes directly from shared staging chunks using the existing resumable upload protocol. They still read and transmit the whole changed file on a new upload. Changing this option does not convert existing archives or recapture unchanged files.
 
+For bounded background runs, use `capture --max-bytes BYTES --reserve-bytes BYTES`.
+The budget counts changed source bytes admitted during that run, including failed
+parses; unchanged checkpoints cost no budget. A file larger than the remaining
+budget is deferred with its checkpoint intact. Choose a budget large enough for
+the largest session that must be captured. Deferred work reports partial coverage.
+Capture stages complete records on the data directory's filesystem and checks free
+space for that source copy, another source-sized allowance when raw archival is
+enabled, and the configured reserve (64 MiB by default). This is a conservative
+preflight, not a disk reservation: concurrent activity, source growth, and catalog
+writes can still exhaust space. Capture never removes native files to make room.
+
 ## Agent interface
 
 Launch `.venv/bin/session-search --data-dir demo-state/local mcp` as a stdio MCP server. It exposes only `search`, `context`, and `status`; capture and administrative maintenance are separate CLI operations. The MCP adapter returns one bounded text payload per tool call to avoid duplicating evidence in structured and text outputs.

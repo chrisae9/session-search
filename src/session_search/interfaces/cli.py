@@ -112,6 +112,10 @@ def parser() -> argparse.ArgumentParser:
                          help="explicitly retain exact raw session files in this local catalog")
     capture.add_argument("--chunk-raw", action="store_true",
                          help="share raw archival or staging chunks; requires --archive-raw")
+    capture.add_argument("--max-bytes", type=int,
+                         help="bound changed source bytes per run; excess work remains uncaptured")
+    capture.add_argument("--reserve-bytes", type=int, default=64 * 1024 * 1024,
+                         help="free-space reserve after estimated capture staging")
     capture.add_argument("--force", action="store_true",
                          help="explicit recovery: recapture files even when checkpoints match")
     search = commands.add_parser("search", help="retrieve cited evidence")
@@ -294,7 +298,8 @@ def main(argv=None) -> int:
                 output = {"version": 1, "status": "ok", "coverage": catalog.status()}
             elif args.command == "capture":
                 output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw,
-                                      force=args.force, chunk_raw=args.chunk_raw)
+                                      force=args.force, chunk_raw=args.chunk_raw,
+                                  max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             elif args.command == "search":
                 exclude = list(args.exclude_session)
                 current = os.environ.get("CODEX_THREAD_ID")
@@ -333,7 +338,8 @@ def remote_command(args, client: Client) -> dict:
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
             result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw,
-                                  force=args.force, chunk_raw=args.chunk_raw)
+                                  force=args.force, chunk_raw=args.chunk_raw,
+                                  max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             result["queue"] = queue.status()
             return result
     if args.command == "init":

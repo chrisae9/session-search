@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from contextlib import nullcontext
 from pathlib import Path
@@ -89,27 +90,39 @@ def _validate_raw_options(catalog, archive_raw: bool, chunk_raw: bool) -> None:
 
 
 def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
-                 force: bool = False, chunk_raw: bool = False) -> dict:
+                 force: bool = False, chunk_raw: bool = False,
+                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
     _validate_raw_options(catalog, archive_raw, chunk_raw)
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise ValueError("capture reserve must be a nonnegative byte count")
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
+        raise ValueError("capture byte budget must be nonnegative")
     # A lightweight client's staging copy must survive until its queue record is
     # committed, even when another process finishes uploading the same object.
     with getattr(catalog, "capture_guard", nullcontext)():
         return _capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
-                             chunk_raw=chunk_raw)
+                             chunk_raw=chunk_raw, reserve_bytes=reserve_bytes, max_bytes=max_bytes)
 
 
 def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
-                  force: bool = False, chunk_raw: bool = False) -> dict:
+                  force: bool = False, chunk_raw: bool = False,
+                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
     path = path.resolve()
     before = fingerprint(path)
     if not force and catalog.fingerprint(str(path)) == before:
         if not archive_raw or catalog.has_raw(str(path), before):
             return {"status": "unchanged"}
+    source_bytes = path.stat().st_size
+    if max_bytes is not None and source_bytes > max_bytes:
+        return {"status": "deferred", "reason": "capture_byte_budget", "retryable": True}
+    required = source_bytes * (2 if archive_raw else 1) + reserve_bytes
+    if shutil.disk_usage(catalog.root).free < required:
+        return {"status": "deferred", "reason": "insufficient_staging_space", "retryable": True}
     # Preserve the rollout basename: the Codex parser uses it to distinguish
     # fork-owned evidence from inherited parent history.
     complete_bytes = 0
     partial_tail = False
-    with tempfile.TemporaryDirectory(prefix="session-search-capture-") as staging:
+    with tempfile.TemporaryDirectory(prefix=".capture-", dir=catalog.root) as staging:
         snapshot = Path(staging) / path.name
         complete_bytes, partial_tail = copy_complete_records(path, snapshot)
         if fingerprint(path) != before:
@@ -130,12 +143,17 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
             ), checkpoint=(str(path), before), **({"raw": raw} if raw else {}),
         )
     return {"status": "captured", **receipt, "events": len(session.events),
-            "complete_bytes": complete_bytes, "partial_tail": partial_tail}
+            "complete_bytes": complete_bytes, "partial_tail": partial_tail, "source_bytes": source_bytes}
 
 
 def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bool = False,
-                 force: bool = False, chunk_raw: bool = False) -> dict:
+                 force: bool = False, chunk_raw: bool = False,
+                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
     _validate_raw_options(catalog, archive_raw, chunk_raw)
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise ValueError("capture reserve must be a nonnegative byte count")
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
+        raise ValueError("capture byte budget must be nonnegative")
     home = home.resolve()
     files = {}
     accessible_roots = 0
@@ -147,18 +165,26 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
             for path in directory.rglob("*.jsonl"):
                 files[_session_id_from_path(path)] = path
     counts: dict[str, int] = {}
+    admitted_bytes = 0
     for path in sorted(files.values()):
+        attempt_bytes = 0
         try:
+            attempt_bytes = path.stat().st_size
             result = capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
-                                  chunk_raw=chunk_raw)
+                                  chunk_raw=chunk_raw, reserve_bytes=reserve_bytes,
+                                  max_bytes=None if max_bytes is None else max(0, max_bytes - admitted_bytes))
+            if result["status"] not in {"unchanged", "deferred"}:
+                admitted_bytes += result.get("source_bytes", attempt_bytes)
             label = result["status"]
             counts[label] = counts.get(label, 0) + 1
         except (OSError, ValueError) as exc:
+            admitted_bytes += attempt_bytes
             # Do not echo paths or transcript-containing parse errors into logs.
             errors.append({"source_id": digest(str(path).encode()),
                            "error": type(exc).__name__, "retryable": True})
-    state = "partial" if errors else "complete" if files else (
-        "empty" if accessible_roots else "unavailable"
-    )
+    if errors or counts.get("deferred") or counts.get("changed_during_read"):
+        state = "partial"
+    else:
+        state = "complete" if files else "empty" if accessible_roots else "unavailable"
     return {"version": 1, "status": state, "counts": counts, "errors": errors,
-            "discovered": len(files), "raw_archival_enabled": archive_raw}
+            "discovered": len(files), "raw_archival_enabled": archive_raw, "admitted_source_bytes": admitted_bytes}
