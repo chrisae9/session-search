@@ -38,11 +38,11 @@ Acknowledged history must survive a process restart. Embedding availability must
 
 ![diagram](./capture-and-search.svg)
 
-Capture stages complete JSONL records and retries partial tails later. The current parser rereads a changed session; parsing only appended records remains planned. Upload retries preserve identity rather than creating duplicate history. The server acknowledges only after content and metadata are durably committed.
+Capture stages complete JSONL records and retries partial tails later. With `--incremental`, persistent checkpoints reuse completed turns after verifying the full prior byte prefix and session ownership. A missing or incompatible checkpoint falls back to a full parse. Staging and prefix verification still read existing bytes; incremental parsing does not make total capture I/O constant. Upload retries preserve identity, and acknowledgement follows durable content and metadata commits.
 
-Keyword coverage becomes available before semantic work completes. The target dispatcher reserves capacity for interactive queries. Current workers serialize bounded background batches; shared-endpoint admission and cancellation still require qualification. Failed records remain visible and retryable without blocking later records.
+Keyword coverage becomes available before semantic work completes. Background indexers share a per-catalog lock; interactive query embeddings bypass it and use a bounded provider timeout. A pilot sustained-contention check passed, but this does not control unrelated applications sharing the endpoint. Failed records remain visible and retryable without blocking later records. See [retrieval evaluation](retrieval-evaluation.md) for measurements and limits.
 
-The engine reuses immutable index generations, loads metadata lazily, and avoids loading vectors for keyword-only queries. Citations identify a session, revision, and event independently of an index generation or a machine's file path.
+The primary updates its SQLite catalog transactionally. The standby activates verified immutable snapshots and pins generations for active readers. Keyword-only queries do not load vectors. Citations identify a session, revision, and event independently of a snapshot generation or a machine's file path.
 
 ## 4. Reclaim local storage only after proving recovery
 

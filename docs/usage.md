@@ -146,7 +146,7 @@ current code reads both. Raw-file identities remain hashes of the complete
 original bytes. Backup and replacement-primary preparation preserve shared chunks
 and verify every reconstructed file. Enable it with `serve --chunk-raw` for uploads
 or `capture --archive-raw --chunk-raw` for local or client capture. Upgrade recovery tools
-before enabling chunk-backed archival; it is not yet the live deployment default.
+before enabling chunk-backed archival; the feature is opt-in.
 
 Client `flush` removes unreferenced staging recipes and chunks after reading all
 pending upload references under the capture lock. Conflicted and rejected work
