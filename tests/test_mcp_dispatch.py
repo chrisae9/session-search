@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from session_search.interfaces.mcp import create_mcp
 
@@ -42,6 +43,9 @@ def test_blocked_search_does_not_block_status(tmp_path):
 
 def test_cancellation_keeps_dispatch_capacity_until_threads_finish(tmp_path):
     async def scenario():
+        # Exercise all eight admitted operations simultaneously, independent of
+        # the CI host's CPU-derived default executor size (which may be seven).
+        asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=8))
         client = SlowClient()
         server = create_mcp(tmp_path, client=client)
         tasks = [asyncio.create_task(server.call_tool('search', {'text': 'slow'})) for _ in range(8)]
