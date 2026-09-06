@@ -288,4 +288,6 @@ Capture summaries report full and incremental parse counts, reused event totals,
 and saved checkpoint counts. `--force` bypasses checkpoint reuse. Parser-source changes
 invalidate stored checkpoints automatically. Cache publication follows successful
 catalog or queue ingestion; a failed cache write does not undo captured evidence.
-The flag remains opt-in pending end-to-end qualification and pilot rollout.
+The flag remains opt-in. It is enabled in the Mac pilot after capture/queue
+qualification and a successful scheduled reuse; other clients need their own
+performance qualification.
