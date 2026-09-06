@@ -1,6 +1,57 @@
 import json
+import subprocess
+import sys
+
+import pytest
 
 from session_search.interfaces.capture_status import capture_status
+
+
+@pytest.mark.parametrize('kind', ['fifo', 'directory', 'symlink', 'dangling',
+                                 'replaced_fifo', 'replaced_symlink'])
+def test_capture_status_validates_opened_file_without_blocking(tmp_path, kind):
+    # Bound the child lifetime so a FIFO regression cannot hang the test runner.
+    code = '''
+import json, os, sys
+from pathlib import Path
+from session_search.interfaces.capture_status import capture_status
+root, kind = Path(sys.argv[1]), sys.argv[2]
+path = root / 'sync-status.json'
+target = root / 'target'
+valid = json.dumps({'version': 1, 'status': 'complete',
+                   'completed_at': '2026-09-06T00:00:00+00:00', 'capture': {}})
+def substitute():
+    path.unlink()
+    if kind == 'replaced_fifo':
+        os.mkfifo(path)
+    else:
+        path.symlink_to(target)
+if kind == 'fifo':
+    os.mkfifo(path)
+elif kind == 'directory':
+    path.mkdir()
+elif kind in {'symlink', 'dangling'}:
+    if kind == 'symlink':
+        target.write_text(valid)
+    path.symlink_to(target)
+else:
+    path.write_text(valid)
+    target.write_text(valid)
+    original_open, original_path_open = os.open, Path.open
+    def open_replacement(name, flags, *args, **kwargs):
+        if Path(name) == path:
+            substitute()
+        return original_open(name, flags, *args, **kwargs)
+    def path_open_replacement(self, *args, **kwargs):
+        if self == path:
+            substitute()
+        return original_path_open(self, *args, **kwargs)
+    os.open, Path.open = open_replacement, path_open_replacement
+print(json.dumps(capture_status(root)))
+'''
+    result = subprocess.run([sys.executable, '-c', code, str(tmp_path), kind],
+                            capture_output=True, text=True, timeout=5, check=True)
+    assert json.loads(result.stdout) == {'status': 'unavailable'}
 
 
 def test_outage_queue_summary_never_bootstraps_or_masks_corruption(tmp_path):

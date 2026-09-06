@@ -1,6 +1,7 @@
 """Bounded, read-only summaries of this installation's last completed sync."""
 
 import json
+import os
 import stat
 from datetime import datetime
 from pathlib import Path
@@ -40,9 +41,12 @@ def with_outage_capture_status(result: dict, root: Path) -> dict:
 def capture_status(root: Path) -> dict:
     path = root / 'sync-status.json'
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
-            raise ValueError('sync receipt is not a regular file')
-        with path.open('rb') as stream:
+        # Check the opened inode so pathname replacement cannot bypass validation
+        # or turn a status request into a blocking FIFO read.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError('sync receipt is not a regular file')
             content = stream.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024:
             raise ValueError('oversized sync receipt')
