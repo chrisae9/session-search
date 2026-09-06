@@ -10,11 +10,7 @@ from session_search.core.records import SearchQuery
 from session_search.storage.catalog import Catalog
 
 
-def terms(text):
-    # Use ASCII triples only, so candidate case folding matches SQLite lower().
-    triples = list(dict.fromkeys(text[i:i + 3].lower() for i in range(len(text) - 2)
-                                if all(32 <= ord(c) < 127 for c in text[i:i + 3])))
-    return ' AND '.join('"' + value.replace('"', '""') + '"' for value in triples[:8])
+from session_search.storage.literal import terms
 
 
 def main():
@@ -31,7 +27,7 @@ def main():
         before = path.stat().st_size
         start = time.monotonic()
         db.execute("CREATE VIRTUAL TABLE literal_probe USING fts5(text,content='',detail=none,columnsize=0,tokenize='trigram')")
-        db.execute('INSERT INTO literal_probe(rowid,text) SELECT row_id,text FROM evidence')
+        db.execute("INSERT INTO literal_probe(rowid,text) SELECT row_id,replace(text,char(0),' ') FROM evidence")
         db.commit()
         report = {'index_build_seconds': round(time.monotonic() - start, 3),
                   'index_added_bytes': path.stat().st_size - before, 'queries': []}

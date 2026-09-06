@@ -33,6 +33,8 @@ def parser() -> argparse.ArgumentParser:
     legacy.add_argument("--allow-superseded-conflicts", action="store_true",
                         help="permit conflicting old revisions only when a unique newer revision exists")
     commands.add_parser("status", help="inspect catalog coverage")
+    literal_index = commands.add_parser("build-literal-index", help="build optional substring candidates locally")
+    literal_index.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
     commands.add_parser("compact-client", help="reclaim acknowledged upload payload pages when idle")
     commands.add_parser("fence-primary", help="prevent further cooperating local catalog and transfer writes")
     prepare = commands.add_parser("prepare-primary", help="prepare a new primary from exact recovery evidence")
@@ -267,6 +269,14 @@ def main(argv=None) -> int:
         if args.command == "mcp":
             from session_search.interfaces.mcp import create_mcp
             create_mcp(args.data_dir, client, provider).run(transport="stdio")
+            return 0
+        if args.command == "build-literal-index":
+            if client:
+                raise ValueError("literal index construction runs on the data host")
+            from session_search.storage.literal import build
+            with Catalog(args.data_dir.resolve()) as catalog:
+                output = build(catalog, reserve_bytes=args.reserve_bytes)
+            print(canonical_json(output))
             return 0
         if args.command == "embed":
             if provider is None:

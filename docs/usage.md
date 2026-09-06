@@ -238,3 +238,30 @@ inference wait itself. Other frontends' local embedding calls remain in-process.
 Add `--short-timeout` to the native MCP check to force keyword fallback with a
 1 ms inference wait, then verify that the same worker completes and semantic
 retrieval recovers. This exercises fallback without a duplicate model process.
+
+## Optional literal index
+
+`build-literal-index` creates a trigram candidate index on a local writable catalog.
+It is opt-in because it adds storage: the pilot measured about 115 MB for its
+catalog. The command requires SQLite's FTS5 trigram tokenizer and checks free space
+against twice the stored text bytes plus a configurable reserve (2 GiB by default).
+As with other capacity checks, this is a preflight rather than a reservation.
+
+```sh
+session-search --data-dir DATA_DIRECTORY build-literal-index
+```
+
+Construction, readiness metadata, and the insertion trigger commit together.
+An interrupted build leaves the previous catalog state intact. The trigger indexes
+new immutable evidence in its ingestion transaction, including writes from older
+application releases. Building the index advances the publication so future
+snapshots can carry it. It consumes replica and backup space as part of the catalog.
+
+Literal retrieval uses at most eight printable ASCII triples to narrow candidates,
+then applies its original exact substring predicate, filters, and ordering. NULs
+are replaced with spaces only in indexed candidate text, avoiding older SQLite
+trigram behavior that stops indexing at NUL. Original evidence remains exact. Short
+or other queries without a usable triple use the scan path. Missing readiness,
+a missing maintenance trigger, unsupported tokenizer, or an evidence high-water
+mismatch also selects the scan path. It does not change keyword or hybrid ranking.
+The index has not yet been enabled on the live deployment.
