@@ -133,6 +133,8 @@ def parser() -> argparse.ArgumentParser:
     sync.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
     sync.add_argument("--archive-raw", action="store_true")
     sync.add_argument("--chunk-raw", action="store_true")
+    sync.add_argument("--incremental", action="store_true", help="reuse verified disposable parser checkpoints")
+    capture.add_argument("--incremental", action="store_true", help="reuse verified disposable parser checkpoints")
     sync.add_argument("--flush-limit", type=int, default=100)
     search = commands.add_parser("search", help="retrieve cited evidence")
     search.add_argument("query")
@@ -299,7 +301,7 @@ def main(argv=None) -> int:
             output = sync_once(args.data_dir, args.codex_home, args.producer, client=client,
                                max_bytes=args.max_bytes, max_pending_bytes=args.max_pending_bytes,
                                reserve_bytes=args.reserve_bytes, archive_raw=args.archive_raw,
-                               chunk_raw=args.chunk_raw, flush_limit=args.flush_limit)
+                               chunk_raw=args.chunk_raw, incremental=args.incremental, flush_limit=args.flush_limit)
             print(canonical_json(output))
             return 0
         if args.command == "flush":
@@ -336,7 +338,7 @@ def main(argv=None) -> int:
                           "local_capture_sync": capture_status(args.data_dir)}
             elif args.command == "capture":
                 output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw,
-                                      force=args.force, chunk_raw=args.chunk_raw,
+                                      force=args.force, chunk_raw=args.chunk_raw, incremental=args.incremental,
                                   max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             elif args.command == "search":
                 exclude = list(args.exclude_session)
@@ -376,7 +378,7 @@ def remote_command(args, client: Client) -> dict:
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
             result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw,
-                                  force=args.force, chunk_raw=args.chunk_raw,
+                                  force=args.force, chunk_raw=args.chunk_raw, incremental=args.incremental,
                                   max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             result["queue"] = queue.status()
             return result

@@ -31,7 +31,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
 - [x] Incremental parser engine with complete-prefix verification, original line boundaries, and ownership-change fallback.
-- [ ] Durable bounded parser checkpoints and integration into recurring capture.
+- [x] Bounded atomic parser checkpoints and opt-in capture/sync integration with full-parse fallback.
+- [ ] End-to-end persistent-cache performance qualification and pilot rollout.
 - [x] Chunk-backed catalog acknowledgement, version 2 snapshots, dual Restic restoration, and replacement-primary preparation.
 - [x] Opt-in server raw-upload chunking with the existing client protocol, shared-prefix reuse, and publication retry recovery.
 - [x] Opt-in local-only capture into shared raw chunks.

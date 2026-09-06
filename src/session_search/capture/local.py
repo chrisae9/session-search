@@ -90,7 +90,7 @@ def _validate_raw_options(catalog, archive_raw: bool, chunk_raw: bool) -> None:
 
 
 def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
-                 force: bool = False, chunk_raw: bool = False,
+                 force: bool = False, chunk_raw: bool = False, incremental: bool = False,
                  reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
     _validate_raw_options(catalog, archive_raw, chunk_raw)
     if type(reserve_bytes) is not int or reserve_bytes < 0:
@@ -101,11 +101,11 @@ def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bo
     # committed, even when another process finishes uploading the same object.
     with getattr(catalog, "capture_guard", nullcontext)():
         return _capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
-                             chunk_raw=chunk_raw, reserve_bytes=reserve_bytes, max_bytes=max_bytes)
+                             chunk_raw=chunk_raw, incremental=incremental, reserve_bytes=reserve_bytes, max_bytes=max_bytes)
 
 
 def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
-                  force: bool = False, chunk_raw: bool = False,
+                  force: bool = False, chunk_raw: bool = False, incremental: bool = False,
                  reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
     path = path.resolve()
     before = fingerprint(path)
@@ -127,10 +127,19 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
         complete_bytes, partial_tail = copy_complete_records(path, snapshot)
         if fingerprint(path) != before:
             return {"status": "changed_during_read", "retryable": True}
-        parsed = CodexParser(session_index=Path(staging) / "no-index", strict=True).parse_session(snapshot)
-        if parsed.project_dir == staging:
-            parsed.project_dir = str(path.parent)
-        session = normalize_session(parsed)
+        cache = next_checkpoint = None
+        parse_work = {"mode": "full", "reused_events": 0}
+        if incremental:
+            from session_search.capture.checkpoints import CheckpointCache
+            from session_search.capture.incremental import parse_incremental
+            cache = CheckpointCache(catalog.root / "parser-checkpoints")
+            session, next_checkpoint, parse_work = parse_incremental(
+                snapshot, None if force else cache.load(path), project_fallback=str(path.parent))
+        else:
+            parsed = CodexParser(session_index=Path(staging) / "no-index", strict=True).parse_session(snapshot)
+            if parsed.project_dir == staging:
+                parsed.project_dir = str(path.parent)
+            session = normalize_session(parsed)
         raw = None
         if archive_raw:
             from session_search.storage.objects import ObjectStore
@@ -142,12 +151,14 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
                 f"{producer}:{path}:{before}:raw={archive_raw}".encode()
             ), checkpoint=(str(path), before), **({"raw": raw} if raw else {}),
         )
-    return {"status": "captured", **receipt, "events": len(session.events),
+        if cache is not None:
+            parse_work["checkpoint_saved"] = cache.save(path, next_checkpoint)
+    return {"status": "captured", **receipt, "events": len(session.events), "parser": parse_work,
             "complete_bytes": complete_bytes, "partial_tail": partial_tail, "source_bytes": source_bytes}
 
 
 def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bool = False,
-                 force: bool = False, chunk_raw: bool = False,
+                 force: bool = False, chunk_raw: bool = False, incremental: bool = False,
                  reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
     _validate_raw_options(catalog, archive_raw, chunk_raw)
     if type(reserve_bytes) is not int or reserve_bytes < 0:
@@ -166,15 +177,21 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
                 files[_session_id_from_path(path)] = path
     counts: dict[str, int] = {}
     admitted_bytes = 0
+    parser_counts = {"full": 0, "incremental": 0, "reused_events": 0, "checkpoints_saved": 0}
     for path in sorted(files.values()):
         attempt_bytes = 0
         try:
             attempt_bytes = path.stat().st_size
             result = capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
-                                  chunk_raw=chunk_raw, reserve_bytes=reserve_bytes,
+                                  chunk_raw=chunk_raw, incremental=incremental, reserve_bytes=reserve_bytes,
                                   max_bytes=None if max_bytes is None else max(0, max_bytes - admitted_bytes))
             if result["status"] not in {"unchanged", "deferred"}:
                 admitted_bytes += result.get("source_bytes", attempt_bytes)
+            if "parser" in result:
+                parsed = result["parser"]
+                parser_counts[parsed["mode"]] += 1
+                parser_counts["reused_events"] += parsed.get("reused_events", 0)
+                parser_counts["checkpoints_saved"] += int(parsed.get("checkpoint_saved", False))
             label = result["status"]
             counts[label] = counts.get(label, 0) + 1
         except (OSError, ValueError) as exc:
@@ -187,4 +204,5 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
     else:
         state = "complete" if files else "empty" if accessible_roots else "unavailable"
     return {"version": 1, "status": state, "counts": counts, "errors": errors,
-            "discovered": len(files), "raw_archival_enabled": archive_raw, "admitted_source_bytes": admitted_bytes}
+            "discovered": len(files), "raw_archival_enabled": archive_raw, "admitted_source_bytes": admitted_bytes,
+            "parser": parser_counts}

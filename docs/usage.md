@@ -266,3 +266,25 @@ a missing maintenance trigger, unsupported tokenizer, or an evidence high-water
 mismatch also selects the scan path. It does not change keyword or hybrid ranking.
 The pilot primary has the index enabled; its standby still uses the scan path.
 Broader workload and replica qualification remain outstanding.
+
+
+## Optional incremental capture
+
+Add `--incremental` to `capture` or `sync` to reuse completed normalized turns
+from a disposable local parser checkpoint. The source's entire previous byte
+prefix is verified before reuse. The unfinished final turn is parsed again with
+its original line numbers, and changed ownership metadata forces a full parse.
+This does not skip raw archival or change the capture byte and space preflights.
+
+Checkpoints live in `DATA_DIRECTORY/parser-checkpoints`, with a 512 MiB encoded
+file budget and a 128 MiB decoded entry limit. Old entries are evicted when needed;
+replacement reserves room for both old and new entries. Oversized, unavailable,
+corrupt, or incompatible entries fall back to full parsing. Checkpoints contain
+redacted normalized events and ownership metadata, are private, and are not
+included in recovery snapshots. They are an optimization, not recovery evidence.
+
+Capture summaries report full and incremental parse counts, reused event totals,
+and saved checkpoint counts. `--force` bypasses checkpoint reuse. Parser-source changes
+invalidate stored checkpoints automatically. Cache publication follows successful
+catalog or queue ingestion; a failed cache write does not undo captured evidence.
+The flag remains opt-in pending end-to-end qualification and pilot rollout.
