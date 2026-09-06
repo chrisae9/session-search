@@ -14,6 +14,11 @@
 | Disk nearly full | Apply visible backpressure; never silently discard pending history. |
 | Local model missing | Provide keyword search and actionable status without a network download. |
 
+When both remote endpoints are unavailable, CLI and MCP search/context responses
+include a read-only local capture summary and pending queue counts. Missing local
+state is distinguished from an unreadable queue; neither is reported as zero
+pending work. These responses remain `unavailable`, never empty search results.
+
 ## Durability and retention
 
 Track upload acknowledgement, lexical coverage, semantic coverage, replication, and backup completion separately. A healthy repository or recent backup time does not prove that a particular session revision is recoverable.

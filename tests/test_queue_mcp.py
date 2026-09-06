@@ -15,6 +15,38 @@ def revision(sid, text):
     return SessionRevision(sid, (Event("e1", "user", text),))
 
 
+@pytest.mark.parametrize('operation', ['search', 'context'])
+def test_both_servers_down_reports_local_pending_work_in_cli_and_mcp(tmp_path, monkeypatch, operation):
+    from session_search.interfaces.client import Client
+    from session_search.interfaces.cli import parser, remote_command
+    client = Client('http://localhost:1', tmp_path / 'unused-token', standby='http://localhost:2')
+    attempts = []
+    def offline(endpoint, *args):
+        attempts.append(endpoint)
+        raise RemoteError(None)
+    monkeypatch.setattr(client, '_request', offline)
+    with UploadQueue(tmp_path) as queue:
+        queue.ingest(revision('s', 'retained private evidence'), producer='d', request_id='one')
+        arguments = ['search', 'restore'] if operation == 'search' else ['context', '[]']
+        args = parser().parse_args(['--data-dir', str(tmp_path), *arguments])
+        cli = remote_command(args, client)
+        async def run():
+            server = create_mcp(tmp_path, client)
+            response = await server.call_tool(operation, {'text': 'restore'} if operation == 'search'
+                                              else {'citations': []})
+            return json.loads(response[0].text)
+        mcp = asyncio.run(run())
+        for response in (cli, mcp):
+            assert response['status'] == 'unavailable'
+            assert response['reason'] == 'search_servers_unreachable'
+            assert 'results' not in response
+            assert response['queue'] == {'pending': 1, 'states': {'pending': 1}}
+            assert response['local_capture_sync']['status'] == 'not_observed'
+            assert 'private evidence' not in json.dumps(response)
+        assert attempts == [client.primary, client.standby] * 2
+        assert queue.status()['pending'] == 1
+
+
 def test_pending_work_survives_reopen_and_outage(tmp_path):
     session = revision("a", "retained")
     with UploadQueue(tmp_path) as queue:

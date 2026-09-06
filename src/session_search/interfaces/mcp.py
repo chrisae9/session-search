@@ -43,7 +43,10 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
 
     def invoke(operation, payload):
         if client:
-            return client.read(operation, payload)
+            from session_search.interfaces.capture_status import with_outage_capture_status
+            result = client.read(operation, payload)
+            return (with_outage_capture_status(result, data_dir)
+                    if operation != 'status' else result)
         with Catalog(data_dir.resolve(), readonly=True) as catalog:
             if operation == "search":
                 from session_search.storage.semantic import hybrid_search

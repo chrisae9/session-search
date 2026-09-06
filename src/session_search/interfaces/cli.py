@@ -414,6 +414,7 @@ def main(argv=None) -> int:
 
 
 def remote_command(args, client: Client) -> dict:
+    from session_search.interfaces.capture_status import with_outage_capture_status
     from dataclasses import asdict
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
@@ -439,16 +440,17 @@ def remote_command(args, client: Client) -> dict:
                 db.close()
         return result
     if args.command == "context":
-        return bounded_response(client.read("context", {
+        return bounded_response(with_outage_capture_status(client.read("context", {
             "citations": json.loads(args.citations), "neighbors": args.neighbors,
-            "budget": args.budget}), args.budget)
+            "budget": args.budget}), args.data_dir), args.budget)
     exclude = list(args.exclude_session)
     if not args.include_current_session and os.environ.get("CODEX_THREAD_ID"):
         exclude.append(os.environ["CODEX_THREAD_ID"])
     query = SearchQuery(args.query, args.literal, args.role, args.after, args.before,
                         args.project, args.session_id, args.producer, tuple(exclude),
                         args.include_subagents, args.limit)
-    return bounded_response(client.read("search", {**asdict(query), "budget": args.budget}), args.budget)
+    return bounded_response(with_outage_capture_status(
+        client.read("search", {**asdict(query), "budget": args.budget}), args.data_dir), args.budget)
 
 
 if __name__ == "__main__":

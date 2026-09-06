@@ -1,15 +1,47 @@
 """Bounded, read-only summaries of this installation's last completed sync."""
 
 import json
+import stat
 from datetime import datetime
 from pathlib import Path
 
 
+def with_outage_capture_status(result: dict, root: Path) -> dict:
+    """Keep a search outage distinct from missing local capture or pending work."""
+    if result.get('status') != 'unavailable':
+        return result
+    import sqlite3
+    import time
+    queue = {'status': 'not_initialized'}
+    path = root / 'upload-queue.sqlite3'
+    try:
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            info = None
+        if info is not None:
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError('queue is not a regular file')
+            db = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=0.1)
+            try:
+                deadline = time.monotonic() + 0.1
+                db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+                rows = db.execute('SELECT state,COUNT(*) FROM pending GROUP BY state').fetchall()
+                if any(state not in {'pending', 'conflict', 'rejected'} for state, _ in rows):
+                    raise ValueError('unknown queue state')
+                queue = {'pending': sum(count for _, count in rows), 'states': dict(rows)}
+            finally:
+                db.close()
+    except (OSError, ValueError, sqlite3.Error):
+        queue = {'status': 'unavailable'}
+    return {**result, 'local_capture_sync': capture_status(root), 'queue': queue}
+
+
 def capture_status(root: Path) -> dict:
     path = root / 'sync-status.json'
-    if path.is_symlink():
-        return {'status': 'unavailable'}
     try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError('sync receipt is not a regular file')
         with path.open('rb') as stream:
             content = stream.read(1024 * 1024 + 1)
         if len(content) > 1024 * 1024:
