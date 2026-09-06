@@ -204,5 +204,19 @@ sandbox-exec -p '(version 1)(allow default)(deny network*)' \
 The check requires a permission-denied network probe, loads the real model, checks
 long-input handling, indexes synthetic evidence, and verifies semantic retrieval
 and cited context. It reports elapsed time and peak memory; native model startup
-and memory are additional costs compared with keyword-only mode. This check does
-not qualify semantic MCP cold-start latency or whole-corpus retrieval quality.
+and memory are additional costs compared with keyword-only mode. This engine check does not qualify whole-corpus retrieval quality.
+
+Run `tests/check_local_mcp.py MODEL_PATH MODEL_SHA256` under the same OS network
+denial with both the `local` and `mcp` extras installed to check the actual stdio
+interface. It prepares synthetic vectors in a separate process, starts a fresh
+MCP server with an unloaded model, then checks first-query and warm semantic
+retrieval, a concurrent literal query, context, and status. Fresh process does not
+mean a cold filesystem or Metal shader cache.
+
+The qualified pilot measured 0.67 seconds for the first semantic request and 0.04
+seconds warm. The concurrent literal request took 0.62 seconds. Current synchronous
+MCP dispatch blocks the event loop during model startup, so this is functional
+offline qualification, not a guarantee of independent interactive response times.
+Native initialization also temporarily redirects process output in the upstream
+runtime. Model isolation and bounded dispatch remain required before claiming that
+slow native inference cannot delay or interfere with other MCP operations.
