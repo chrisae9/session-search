@@ -27,6 +27,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Resumable SSH snapshot publication, unchanged-publication skipping, and five-minute timer templates.
 - [x] Source and standby capacity preflights defer replica work while preserving pending snapshots and the current replica.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
+- [x] Device-scoped asynchronous verification, durable client raw acknowledgements, and reviewed thin-client offload with fresh proof and native-file rechecks.
+- [ ] Live thin-client offload qualification and legacy client acknowledgement migration.
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
@@ -63,7 +65,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
 - [ ] Provenance clearance, GitHub publication, and deployment.
 
-Legacy storage remains separate from the imported Session Search catalog. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.
+Legacy storage remains separate from the imported Session Search catalog. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload uses fresh server-side recovery verification; live rollout remains gated on full independent backup coverage.
 
 Background indexers share a lock on the authoritative catalog; standby catalogs cannot index. Query embeddings bypass this background lock. This bounds Session Search background ingestion across primary worker processes, but does not control unrelated applications sharing the model endpoint. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 

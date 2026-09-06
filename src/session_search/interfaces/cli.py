@@ -83,6 +83,15 @@ def parser() -> argparse.ArgumentParser:
     apply.add_argument("plan", type=Path)
     apply.add_argument("--plan-id", required=True)
     apply.add_argument("--repositories", type=Path, required=True)
+    client_plan = commands.add_parser('plan-client-offload', help='review acknowledged native files eligible for offload')
+    client_plan.add_argument('--codex-home', type=Path,
+                             default=Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')))
+    client_plan.add_argument('--output', type=Path, required=True)
+    client_plan.add_argument('--limit', type=int, default=100)
+    client_apply = commands.add_parser('apply-client-offload', help='freshly verify backups and apply a reviewed client plan')
+    client_apply.add_argument('plan', type=Path)
+    client_apply.add_argument('--plan-id', required=True)
+    client_apply.add_argument('--verification-timeout', type=float, default=7200)
     commands.add_parser("mcp", help="serve the three read-only agent tools over stdio")
     embed = commands.add_parser("embed", help="process bounded pending semantic work")
     embed.add_argument("--limit", type=int, default=100)
@@ -171,6 +180,27 @@ def main(argv=None) -> int:
         if args.primary and not args.token_file:
             raise ValueError("remote mode requires a token file")
         client = Client(args.primary, args.token_file, standby=args.standby) if args.primary else None
+        if args.command in {'plan-client-offload', 'apply-client-offload'}:
+            if client is None or not (args.data_dir / 'upload-queue.sqlite3').is_file():
+                raise ValueError('client offload requires a primary and an existing upload queue')
+            from session_search.capture.offload import plan_client_offload, apply_client_offload
+            with UploadQueue(args.data_dir.resolve()) as queue:
+                if args.command == 'plan-client-offload':
+                    plan = plan_client_offload(queue, client, args.codex_home, limit=args.limit)
+                    fd = os.open(args.output, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                    with os.fdopen(fd, 'w') as output_file:
+                        output_file.write(canonical_json(plan))
+                        output_file.flush()
+                        os.fsync(output_file.fileno())
+                    output = {key: plan[key] for key in ('plan_id', 'skipped', 'missing_acknowledgements', 'limit_reached')}
+                    output.update(version=1, status='planned', candidates=len(plan['candidates']))
+                else:
+                    if args.plan.stat().st_size > 1024 * 1024:
+                        raise ValueError('offload plan exceeds size limit')
+                    output = apply_client_offload(queue, client, json.loads(args.plan.read_text()),
+                        expected_plan_id=args.plan_id, timeout=args.verification_timeout)
+            print(canonical_json(output))
+            return 0
         from session_search.core.embeddings import load_provider
         provider = load_provider(args.embedding_config, allow_remote=args.allow_remote_embeddings)
         if args.command in {"backup", "backup-cycle", "restore-backup", "plan-offload", "apply-offload"}:
