@@ -21,6 +21,29 @@ def populate(catalog):
     catalog.ingest(SessionRevision("s", events), producer="d", request_id="1")
 
 
+@pytest.mark.parametrize("event_count,long_chunks", [(520, False), (1, True)])
+def test_semantic_ties_preserve_candidates_and_offsets_across_scan_orders(
+    tmp_path, event_count, long_chunks,
+):
+    with Catalog(tmp_path) as catalog:
+        events = tuple(Event(str(i), "user", ("recovery " * 1500 if long_chunks
+                                             else f"recovery evidence {i}"))
+                       for i in range(event_count))
+        catalog.ingest(SessionRevision("s", events), producer="d", request_id="ties")
+        provider = FakeProvider()
+        index_pending(catalog, provider, limit=1000)
+        query = SearchQuery("restore", limit=100)
+        forward = hybrid_search(catalog, query, provider)
+        catalog.db.execute("PRAGMA reverse_unordered_selects=ON")
+        reverse = hybrid_search(catalog, query, provider)
+        assert forward["mode"] == reverse["mode"] == "hybrid"
+        assert forward["results"] == reverse["results"]
+        assert [hit["citation"]["event_id"] for hit in forward["results"]] == [
+            str(i) for i in range(min(event_count, 100))
+        ]
+        assert all(hit["citation"]["offset"] == 0 for hit in forward["results"])
+
+
 def test_semantic_finds_evidence_without_keyword_overlap_and_preserves_filters(tmp_path):
     with Catalog(tmp_path) as catalog:
         populate(catalog)

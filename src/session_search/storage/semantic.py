@@ -162,10 +162,16 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                 scores = matrix @ vector
                 for row, score in zip(rows, scores):
                     key = row["row_id"]
-                    if float(score) > best.get(key, (-float("inf"), 0))[0]:
-                        best[key] = (float(score), row["chunk_start"])
+                    candidate = (float(score), row["chunk_start"])
+                    previous = best.get(key)
+                    if (previous is None or candidate[0] > previous[0]
+                            or (candidate[0] == previous[0] and candidate[1] < previous[1])):
+                        best[key] = candidate
                 if len(best) > 200:
-                    best = dict(heapq.nlargest(100, best.items(), key=lambda item: item[1][0]))
+                    # Match final ordering even when SQLite changes its scan order.
+                    best = dict(heapq.nlargest(
+                        100, best.items(), key=lambda item: (item[1][0], -item[0]),
+                    ))
             semantic = []
             for row_id, (score, start) in sorted(
                 best.items(), key=lambda pair: (-pair[1][0], pair[0])
