@@ -31,6 +31,9 @@ def compare(catalog, cases, provider):
     actual = dict(catalog.db.execute('SELECT session_id,revision FROM heads'))
     if actual != expected:
         raise ValueError('catalog must exactly match the synthetic fixture; native history is refused')
+    if not catalog.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='vectors'").fetchone():
+        raise ValueError('synthetic vector coverage must be complete')
     vectors = catalog.db.execute(
         'SELECT e.session_id,v.vector FROM events e JOIN heads h '
         'ON e.session_id=h.session_id AND e.revision=h.revision '
