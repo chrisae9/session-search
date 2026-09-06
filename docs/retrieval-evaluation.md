@@ -53,6 +53,18 @@ The reusable benchmark limits candidate terms to eight distinct printable ASCII
 triples and retains the exact substring check. Queries without such a triple use
 the scan path. Synthetic checks cover mixed Unicode, quotes, wildcard
 characters, embedded NULs, and control characters. Production construction is transactional, checks capacity, and maintains new
-evidence on ingestion. Filter and ordering tests are implemented; broader workload
-qualification and standby rollout remain open. An extra search index also consumes replica and
+evidence on ingestion. A subsequent read-only qualification compared 32 production
+search responses against the scan path on one frozen historical catalog. All
+responses matched exactly, including ordered citations, excerpts, the `more_matches` flag, and
+coverage; 21 cases returned evidence and 11 returned no matches. Cases included
+identifiers, short and non-ASCII text, quotes, control characters, and role, time,
+project, session, producer, subagent, and exclusion filters. An empty case verifies
+agreement on absence, not successful retrieval for that filter.
+
+Alternating which path ran first gave median times of 21 ms indexed and 818 ms
+scanning across those cases. This single-pass measurement includes warm-cache
+effects and queries that intentionally use the scan fallback. It does not prove
+semantic relevance, exhaustive corpus parity, sustained concurrency performance,
+or latency on another machine. Standby rollout and additional-machine qualification
+remain open. An extra search index also consumes replica and
 backup capacity, which matters on a constrained standby.
