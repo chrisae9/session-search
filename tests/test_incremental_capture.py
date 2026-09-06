@@ -101,3 +101,18 @@ def test_byte_offsets_across_large_unicode_record(tmp_path):
     assert line_offset(path, 1) == 0
     assert line_offset(path, 2) == len(first)
     assert line_offset(path, 3) == len(first) + 7
+
+
+def test_prefix_hash_at_block_boundary_and_appended_line_offset(tmp_path):
+    import hashlib
+    from session_search.capture.incremental import scan_bytes
+    path = tmp_path / "bytes.jsonl"
+    data = b"x" * (1024 * 1024 + 17) + b"\nlast\n"
+    path.write_bytes(data)
+    for prefix in (0, 1024 * 1024, 1024 * 1024 + 18, len(data)):
+        size, lines, whole, old = scan_bytes(path, prefix)
+        assert size == len(data) and lines == 2
+        assert whole == hashlib.sha256(data).hexdigest()
+        assert old == hashlib.sha256(data[:prefix]).hexdigest()
+    boundary = data.index(b"\n") + 1
+    assert line_offset(path, 2, start_offset=boundary, start_line=2) == boundary

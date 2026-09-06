@@ -25,26 +25,34 @@ class ParseCheckpoint:
 
 def scan_bytes(path, prefix_size):
     full = hashlib.sha256()
-    prefix = hashlib.sha256()
+    prefix_digest = full.hexdigest() if prefix_size == 0 else None
     size = lines = 0
     last = b""
     with path.open("rb") as stream:
         while block := stream.read(1024 * 1024):
-            full.update(block)
-            prefix.update(block[:max(0, min(len(block), prefix_size - size))])
+            split = prefix_size - size
+            if prefix_digest is None and 0 < split <= len(block):
+                full.update(block[:split])
+                prefix_digest = full.hexdigest()
+                full.update(block[split:])
+            else:
+                full.update(block)
             size += len(block)
             lines += block.count(b"\n")
             last = block[-1:]
     if size and last != b"\n":
         raise ValueError("incremental parser requires a complete-record staging file")
-    return size, lines, full.hexdigest(), prefix.hexdigest()
+    return size, lines, full.hexdigest(), prefix_digest
 
 
-def line_offset(path, target):
+def line_offset(path, target, *, start_offset=0, start_line=1):
     """Locate a line boundary without allocating a potentially huge JSON record."""
-    remaining = target - 1
-    offset = 0
+    remaining = target - start_line
+    offset = start_offset
+    if remaining < 0:
+        raise ValueError("target precedes the known line boundary")
     with path.open("rb") as stream:
+        stream.seek(start_offset)
         while remaining:
             block = stream.read(1024 * 1024)
             if not block:
@@ -90,9 +98,17 @@ def parse_incremental(path: Path, checkpoint: ParseCheckpoint | None = None, *,
         last = parsed.turns[-1]
         last_events = normalize_session(replace(parsed, turns=[last])).events
         completed = normalized.events[:-len(last_events)] if last_events else normalized.events
+        turn_line = last.provenance.start
+        if parser.resumed and turn_line == checkpoint.turn_line:
+            turn_offset = checkpoint.turn_offset
+        elif parser.resumed and turn_line > checkpoint.lines:
+            turn_offset = line_offset(path, turn_line, start_offset=checkpoint.size,
+                                      start_line=checkpoint.lines + 1)
+        else:
+            turn_offset = line_offset(path, turn_line)
         next_checkpoint = ParseCheckpoint(
             path.name, size, sha256, lines, tuple(parser.scan_metadata), parser.scan_ownership,
-            line_offset(path, last.provenance.start), last.provenance.start, completed)
+            turn_offset, turn_line, completed)
     after = path.stat()
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
             after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
