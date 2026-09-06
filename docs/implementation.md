@@ -37,6 +37,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
 - [ ] Offline local-inference installation, quality/performance evaluations, and migration.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
+- [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
 - [ ] Provenance clearance, GitHub publication, and deployment.
 
 Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.

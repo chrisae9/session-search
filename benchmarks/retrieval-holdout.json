@@ -1,0 +1,14 @@
+[
+  {"id":"holdout-01","query":"Why did secrets remain readable after removing access?","evidence":"The service cached group membership in long-lived credentials. Short token lifetimes and a server-side revocation check bounded stale authorization."},
+  {"id":"holdout-02","query":"How did we stop occasional garbled characters at chunk boundaries?","evidence":"UTF-8 code points can span network packets. Keeping an incremental text decoder across reads prevented replacement characters when a multibyte sequence arrived in two pieces."},
+  {"id":"holdout-03","query":"What solved the missing newest records when navigating results?","evidence":"Offset pagination skipped rows when concurrent inserts shifted the list. A stable keyset cursor based on timestamp and unique identifier preserved traversal order."},
+  {"id":"holdout-04","query":"Why did the monitor repeatedly restart a healthy but busy process?","evidence":"A liveness probe shared the saturated request worker pool. Separating liveness from readiness prevented overload from becoming a restart storm."},
+  {"id":"holdout-05","query":"How did we keep a wrong clock from expiring leases early?","evidence":"Wall-clock corrections changed elapsed-duration calculations. Using a monotonic clock for lease intervals prevented clock synchronization from changing their duration."},
+  {"id":"holdout-06","query":"What made the first request after an idle period so slow?","evidence":"An aggressive idle timeout closed the upstream connection pool. Keeping a small warm connection pool removed repeated DNS lookup and TLS negotiation from the first request."},
+  {"id":"holdout-07","query":"What fixed ERR_SYNC_701?","evidence":"ERR_SYNC_701 meant the upload cursor referenced a retired generation. Refreshing the generation receipt before retrying fixed this error; changing the credentials did not."},
+  {"id":"holdout-08","query":"What fixed ERR_SYNC_702?","evidence":"ERR_SYNC_702 meant the remote device credential had expired. Issuing a replacement device token fixed this error; refreshing the generation receipt did not."},
+  {"id":"holdout-09","query":"Why was /v2/export returning 404?","evidence":"The reverse proxy stripped the /v2 prefix before forwarding /v2/export. Preserving the complete request path fixed the 404 response."},
+  {"id":"holdout-10","query":"Why was /v2/import returning 404?","evidence":"The /v2/import handler was excluded from the minimal build profile. Enabling the import feature at build time fixed its 404 response."},
+  {"id":"holdout-11","query":"What did commit ab41c92 change?","evidence":"Commit ab41c92 made tombstone writes idempotent so a replayed deletion could not advance the publication counter twice."},
+  {"id":"holdout-12","query":"What did commit ab41c93 change?","evidence":"Commit ab41c93 added explicit bounds to context expansion so requests spanning too many events returned a clear narrowing instruction."}
+]
