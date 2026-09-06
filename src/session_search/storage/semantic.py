@@ -117,6 +117,17 @@ def _index_pending(catalog: Catalog, provider, *, limit: int) -> dict:
 def hybrid_search(catalog: Catalog, query, provider=None) -> dict:
     if provider is None or query.literal:
         return catalog.search(query)
+    # Large vector/evidence joins otherwise thrash SQLite's small default page
+    # cache. Keep the allowance scoped to this read and restore caller settings.
+    previous_cache = catalog.db.execute("PRAGMA cache_size").fetchone()[0]
+    catalog.db.execute("PRAGMA cache_size=-16384")
+    try:
+        return _hybrid_search(catalog, query, provider)
+    finally:
+        catalog.db.execute(f"PRAGMA cache_size={int(previous_cache)}")
+
+
+def _hybrid_search(catalog: Catalog, query, provider) -> dict:
     # Hold a coherent read snapshot for lexical candidates, vector candidates,
     # and their evidence while background publication advances the current head.
     catalog.db.execute("BEGIN")

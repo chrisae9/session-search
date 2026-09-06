@@ -132,3 +132,30 @@ def test_background_work_skips_superseded_only_chunks_but_keeps_shared_evidence(
         assert index_pending(catalog, provider)['embedded'] == 0
         assert catalog.context([citation])['results'][0]['events'][0]['text'] == 'superseded recovery'
         assert catalog.db.execute('SELECT count(*) FROM semantic_chunks').fetchone()[0] == 3
+
+
+def test_semantic_page_cache_is_scoped_and_restored_after_fallback(tmp_path):
+    with Catalog(tmp_path) as catalog:
+        populate(catalog)
+        index_pending(catalog, FakeProvider())
+        catalog.db.execute("PRAGMA cache_size=-1234")
+
+        class Inspect(FakeProvider):
+            fail = False
+
+            def embed(self, text, *, query=False):
+                assert catalog.db.execute("PRAGMA cache_size").fetchone()[0] == -16384
+                if self.fail:
+                    raise OSError("unavailable")
+                return super().embed(text, query=query)
+
+        provider = Inspect()
+        result = hybrid_search(catalog, SearchQuery("recovery"), provider)
+        assert result["mode"] == "hybrid"
+        assert catalog.db.execute("PRAGMA cache_size").fetchone()[0] == -1234
+        provider.fail = True
+        assert hybrid_search(catalog, SearchQuery("recovery"), provider)["degraded"]
+        assert catalog.db.execute("PRAGMA cache_size").fetchone()[0] == -1234
+        assert not catalog.db.in_transaction
+        assert hybrid_search(catalog, SearchQuery("recovery", literal=True), provider)["results"]
+        assert catalog.db.execute("PRAGMA cache_size").fetchone()[0] == -1234
