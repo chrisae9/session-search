@@ -80,6 +80,13 @@ admission allows the full incoming snapshot size plus the reserve, without
 subtracting an existing partial transfer because rsync may need a new temporary
 copy. Current, previous, and pinned generations remain counted as occupied space.
 
+The systemd template accepts `SESSION_SEARCH_REPLICATION_RESERVE_BYTES` in
+`replication.env`, with the same 2 GiB default. On a shared volume, choose a reserve
+above other services' disk-pressure thresholds, with room for their growth and
+recovery. Free space sufficient for a transfer can still trigger an embedding
+service eviction. Check that service's recovery before resuming replication;
+increasing the reserve does not reclaim space or clear an existing pressure state.
+
 Insufficient capacity returns `status: deferred` with `stage: source_snapshot` or
 `stage: standby_transfer`, byte counts, and no new acknowledgement. A pending
 snapshot is retained for retry. This preflight is a point-in-time check, not an
