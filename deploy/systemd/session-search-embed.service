@@ -5,7 +5,6 @@ Description=Index a bounded Session Search embedding backlog
 Type=oneshot
 EnvironmentFile=%h/.config/session-search-v1/embedding.env
 ExecStart=%h/.local/bin/session-search --data-dir ${SESSION_SEARCH_DATA} --embedding-config ${SESSION_SEARCH_EMBEDDING_CONFIG} --allow-remote-embeddings embed --limit ${SESSION_SEARCH_EMBEDDING_BATCH}
-ExecStartPost=/usr/bin/systemctl --user start --no-block session-search-replicate.service
 UMask=0077
 Nice=10
 TimeoutStartSec=30min

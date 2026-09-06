@@ -55,7 +55,7 @@ This timer only replicates searchable evidence. Credential propagation, capture 
 
 ## Background semantic indexing
 
-The primary can install `session-search-embed.service` and its timer alongside replication. Provide a private `embedding.env` containing `SESSION_SEARCH_DATA`, `SESSION_SEARCH_EMBEDDING_CONFIG`, and `SESSION_SEARCH_EMBEDDING_BATCH` (1–10000). The model configuration must identify the explicitly provisioned remote embedding service. This data-host unit does not download or start a model.
+The primary can install `session-search-embed.service` and its timer independently of replication. Provide a private `embedding.env` containing `SESSION_SEARCH_DATA`, `SESSION_SEARCH_EMBEDDING_CONFIG`, and `SESSION_SEARCH_EMBEDDING_BATCH` (1–10000). The model configuration must identify the explicitly provisioned remote embedding service. This data-host unit does not download or start a model. Replication runs on its own timer, so pausing it for destination capacity does not stop embedding progress, and embedding batches do not trigger extra snapshots.
 
 Each run indexes a bounded batch, then requests replication. The timer waits 30 seconds between completed runs. A process-shared catalog lock permits only one background indexer at a time; query embeddings bypass it. Three consecutive provider failures end the batch early, leaving the remaining evidence pending. Standbys cannot run this worker. For local-only installations, use the local provider directly without this remote-model service unit.
 
