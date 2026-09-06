@@ -82,6 +82,14 @@ def parser() -> argparse.ArgumentParser:
     device.add_argument("name")
     device.add_argument("--registry", type=Path, required=True)
     device.add_argument("--output", type=Path, help="new credential file; must not already exist")
+    receive_credentials = commands.add_parser("receive-credentials", help="accept a versioned registry through stdin")
+    receive_credentials.add_argument("--registry", type=Path, required=True)
+    sync_credentials = commands.add_parser("sync-credentials", help="synchronize credential revisions over SSH")
+    sync_credentials.add_argument("--registry", type=Path, required=True)
+    sync_credentials.add_argument("--host", required=True)
+    sync_credentials.add_argument("--remote-registry", required=True)
+    sync_credentials.add_argument("--remote-executable", required=True)
+    sync_credentials.add_argument("--receipt", type=Path, required=True)
     capture = commands.add_parser("capture", help="capture complete Codex records locally")
     capture.add_argument("--codex-home", type=Path,
                          default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
@@ -179,6 +187,20 @@ def main(argv=None) -> int:
             return 0
         if client and provider:
             raise ValueError("remote clients use the server's embedder, not a client model")
+        if args.command in {"receive-credentials", "sync-credentials"}:
+            from session_search.interfaces.credentials import receive_credentials, sync_credentials
+            if client:
+                raise ValueError("credential synchronization runs through SSH administration")
+            if args.command == "receive-credentials":
+                raw = sys.stdin.buffer.read(65537)
+                if len(raw) > 65536:
+                    raise ValueError("credential registry exceeds transfer limit")
+                output = receive_credentials(args.registry, json.loads(raw))
+            else:
+                output = sync_credentials(args.registry, args.host, args.remote_registry,
+                                          args.remote_executable, args.receipt)
+            print(canonical_json(output))
+            return 0 if output["status"] == "synchronized" else 2
         if args.command == "device":
             from session_search.interfaces.credentials import update_device
             if args.action == "add" and not args.output:

@@ -13,6 +13,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
 - [x] Process-shared background embedding admission and bounded retries during provider outages.
 - [x] Three read-only MCP tools and authenticated HTTP transport.
+- [x] Monotonic SSH credential propagation, exact acknowledgements, and independent retry timer templates.
 - [x] Verified snapshot creation and atomic read-only replica activation.
 - [x] Replica retention of current, previous, and actively pinned generations, including reader crash recovery.
 - [x] Explicit search-only replicas, excluded from recovery/offload backup inputs.

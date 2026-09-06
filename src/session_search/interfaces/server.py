@@ -24,7 +24,8 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
     async def authenticate(request: Request, call_next):
         # Reload on each request: revocation does not depend on restarting workers.
         try:
-            entries = json.loads(credentials.read_text())
+            from session_search.interfaces.credentials import read_registry, device_entries
+            entries = device_entries(read_registry(credentials))
         except (OSError, ValueError):
             return JSONResponse({"version": 1, "status": "unavailable"}, status_code=503)
         supplied = request.headers.get("authorization", "")

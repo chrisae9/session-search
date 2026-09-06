@@ -30,7 +30,13 @@ Launch `.venv/bin/session-search --data-dir demo-state/local mcp` as a stdio MCP
   --credentials demo-state/devices.json --port 8765
 ```
 
-The server binds only to loopback. Put it behind a trusted HTTPS proxy for cross-machine access. Device tokens are written to private files; the server registry contains hashes. Removing a device with `device revoke` takes effect on its next request to that server. Propagation to other serving replicas is still a release requirement.
+The server binds only to loopback. Put it behind a trusted HTTPS proxy for cross-machine access. Device tokens are written to private files; the server registry contains hashes. Removing a device with `device revoke` takes effect on its next request to that server.
+
+Use `sync-credentials --registry REGISTRY --host STANDBY --remote-registry REMOTE_REGISTRY --remote-executable REMOTE_EXECUTABLE --receipt RECEIPT` to propagate credentials over SSH. The receiver must already run this version. Initial binding accepts a missing receiver registry or an identical legacy copy; divergent copies require reconciliation. Versioned receivers reject older revisions, changed contents at the same revision, and different authorities. Edit credentials only on the authority.
+
+The credential service and timer templates retry once per minute after the previous run finishes, independently of search replication and embeddings. Configure `SESSION_SEARCH_CREDENTIALS`, `SESSION_SEARCH_CREDENTIAL_HOST`, `SESSION_SEARCH_REMOTE_CREDENTIALS`, `SESSION_SEARCH_REMOTE_EXECUTABLE`, and `SESSION_SEARCH_CREDENTIAL_RECEIPT` in the service environment file. A synchronization is confirmed only when the peer acknowledges the exact revision; failures retain the last acknowledgement and report partial status. An intervening local edit reports behind status and needs another synchronization.
+
+Revocation is asynchronous across hosts: an unreachable peer may still accept its previous device list until synchronization succeeds. After a sensitive revocation, run synchronization immediately and inspect its result before claiming every server has revoked access. The timer retries failures but does not establish an instantaneous global revocation guarantee.
 
 In another shell:
 
