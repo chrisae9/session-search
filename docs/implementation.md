@@ -32,7 +32,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Opt-in server raw-upload chunking with the existing client protocol, shared-prefix reuse, and publication retry recovery.
 - [x] Opt-in local-only capture into shared raw chunks.
 - [x] Opt-in shared client staging with streaming resume, prefix reconciliation, and cleanup rooted in every pending upload.
-- [ ] Deploy shared raw storage and verify against live archives.
+- [x] Pilot deployment of shared raw storage, verified live uploads, and mixed-format backup restoration.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Upload completion publishes the verified staging inode without allocating a second full raw or normalized file.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
@@ -42,17 +42,21 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Cooperative local primary write fencing with active-writer detection and preserved read access.
 - [x] Raw-prefix checkpoint reconciliation and forced recapture after client loss or an older primary restore.
 - [x] Bounded sync cycles with backlog admission, overlap prevention, and Linux/macOS scheduling templates.
-- [ ] Live recurring capture rollout, global embedding admission control, and bounded archival maintenance retention.
-- [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
-- [ ] Offline local-inference installation, quality/performance evaluations, and migration.
+- [x] Pilot macOS recurring capture with successful scheduled uploads and timestamped status.
+- [ ] Global embedding admission control and bounded archival maintenance retention.
+- [x] Pilot authenticated primary/standby deployment, actual MCP search failover, and credential revocation propagation.
+- [ ] Additional client rollout, full independent backup coverage, and live replacement-primary rehearsal.
+- [ ] Recurring verified backup automation.
+- [x] Pilot historical import with legacy citation resolution checks.
+- [ ] Offline local-inference installation and whole-corpus quality/performance qualification.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
 - [ ] Provenance clearance, GitHub publication, and deployment.
 
-Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.
+Legacy storage remains separate from the imported Session Search catalog. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.
 
 Background indexers share a lock on the authoritative catalog; standby catalogs cannot index. Query embeddings bypass this background lock. This bounds Session Search background ingestion across primary worker processes, but does not control unrelated applications sharing the model endpoint. Remote artifact identity relies on explicit configuration plus the returned model name; an unchanged alias is not cryptographic proof of the served artifact.
 
 Parser regression fixtures cover the extracted Codex behavior. [Migration and recovery](migration.md) tests cover historical locator preservation, tombstones, corrupt archives, first-upload checkpoint adoption, lost client checkpoints, and older-primary recovery. Raw-prefix reconciliation covers absent heads or proven byte ancestry; divergent histories remain queued for explicit review. Whole-corpus retrieval parity still needs evaluation; do not infer it from the current unit tests.
 
-The development catalog is schema version 2. The earlier prototype schema is deliberately rejected rather than silently modified; no production Session Search catalog has been migrated. Snapshot verification checks canonical revision digests in addition to database and raw-object integrity.
+The development catalog is schema version 2. The earlier prototype schema is deliberately rejected rather than silently modified. Historical archives are imported through the explicit importer; this is distinct from a schema upgrade. Snapshot verification checks canonical revision digests in addition to database and raw-object integrity.

@@ -40,7 +40,7 @@ flowchart LR
 
 Kiwi remains the only writer. Clients retain pending uploads while it is unavailable; the standby never accepts those writes. Search retries eligible connection failures, timeouts, and transient server errors against the standby. Authentication and invalid-request errors are returned directly.
 
-ArchITX serves Qwen3-Embedding-0.6B-Q8 with 1,024-dimensional vectors. Kiwi's embedding worker is to be disabled; this does not require reembedding when model identity and preprocessing remain compatible. Plex changes and testing are outside Session Search's work.
+ArchITX serves Qwen3-Embedding-0.6B-Q8 with 1,024-dimensional vectors. Kiwi's embedding service is disabled in this deployment; this does not require reembedding when model identity and preprocessing remain compatible. Plex changes and testing are outside Session Search's work.
 
 Both search servers depend on the same embedder. Its failure therefore degrades both to keyword search; having two search servers does not provide embedding redundancy. When both search servers are unreachable, lightweight clients report search unavailable.
 
@@ -59,9 +59,9 @@ flowchart LR
     vectors --> search
 ```
 
-Capture reads complete JSONL records incrementally and retries partial tails later. Upload retries preserve identity rather than creating duplicate history. The server acknowledges only after content and metadata are durably committed.
+Capture stages complete JSONL records and retries partial tails later. The current parser rereads a changed session; parsing only appended records remains planned. Upload retries preserve identity rather than creating duplicate history. The server acknowledges only after content and metadata are durably committed.
 
-Keyword coverage becomes available before semantic work completes. A bounded dispatcher reserves capacity for interactive queries and limits background work. Failed records remain visible and retryable without blocking later records.
+Keyword coverage becomes available before semantic work completes. The target dispatcher reserves capacity for interactive queries. Current workers serialize bounded background batches; shared-endpoint admission and cancellation still require qualification. Failed records remain visible and retryable without blocking later records.
 
 The engine reuses immutable index generations, loads metadata lazily, and avoids loading vectors for keyword-only queries. Citations identify a session, revision, and event independently of an index generation or a machine's file path.
 

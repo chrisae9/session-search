@@ -2,7 +2,7 @@
 
 Find useful evidence from past coding sessions through your agent.
 
-**Under development.** Local capture, cited keyword/hybrid retrieval, CLI/MCP, authenticated HTTP, resumable raw uploads, and verified snapshot primitives are implemented. Deployment automation, thin-client offload coordination, migration, and release qualification remain unfinished. Existing session files have not been migrated.
+**Under development.** Local and remote capture, cited retrieval, CLI/MCP, authenticated search failover, shared raw storage, and scheduled client sync are implemented and running in a pilot deployment. Historical import and exact backup restoration have been exercised. Full independent backup coverage, thin-client offload coordination, local inference packaging, and release qualification remain unfinished.
 
 - [Architecture and diagrams](docs/architecture-rendered.md)
 - [Editable Mermaid source](docs/architecture.md)

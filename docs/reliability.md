@@ -51,7 +51,7 @@ Import into a separate Session Search store and prevent legacy publishers from w
 | Local isolation | With networking disabled, capture and search work; no implicit downloads or remote fallback occur. |
 | Storage | Repeated indexing and interrupted uploads reclaim abandoned artifacts without deleting pending work or cited evidence. |
 
-Measure Session Search@10, MRR@10, query latency, peak memory, ingestion throughput, and storage reclaimed against a fixed baseline. Use synthetic fixtures for public reproduction and a private representative query set for personal relevance. Report measured tradeoffs before changing embedding models or adding retrieval features.
+Measure Recall@10, MRR@10, query latency, peak memory, ingestion throughput, and storage reclaimed against a fixed baseline. Use synthetic fixtures for public reproduction and a private representative query set for personal relevance. Report measured tradeoffs before changing embedding models or adding retrieval features.
 
 ## Replica capacity
 
