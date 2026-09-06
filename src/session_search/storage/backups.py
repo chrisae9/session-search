@@ -20,11 +20,13 @@ class ResticRepository:
     repository: str
     password_file: Path
     restore_directory: Path | None = None
+    inherited_lock_fd: int | None = None
 
     def run(self, arguments: list[str], *, timeout: float = 3600) -> str:
         completed = subprocess.run(
             ["restic", "--repo", self.repository, "--password-file", str(self.password_file),
              *arguments], capture_output=True, text=True, timeout=timeout, check=False,
+            pass_fds=(() if self.inherited_lock_fd is None else (self.inherited_lock_fd,)),
         )
         if completed.returncode:
             # Restic diagnostics may contain credentials embedded in repository URLs.

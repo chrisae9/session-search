@@ -115,6 +115,16 @@ class Client:
                                  {"digest": key, "size": len(encoded)})
         return self._request(self.primary, "/v1/revisions", payload)
 
+    def request_offload_verification(self, nonce: str, requirements: list[dict]) -> dict:
+        return self._request(self.primary, '/v1/offload-verifications',
+                             {'nonce': nonce, 'requirements': requirements})
+
+    def poll_offload_verification(self, job_id: str) -> dict:
+        import re
+        if not isinstance(job_id, str) or not re.fullmatch('[0-9a-f]{64}', job_id):
+            raise ValueError('invalid verification job identity')
+        return self._request(self.primary, '/v1/offload-verifications/' + job_id, None)
+
     def migration_heads(self, sessions: list[str]) -> dict:
         result = self._request(self.primary, "/v1/migration-heads", {"sessions": sessions})
         heads = result.get("heads")

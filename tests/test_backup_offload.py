@@ -45,6 +45,29 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
         assert proof["status"] == "restore_verified"
         assert "source_path" not in json.dumps(proof)
         assert source.exists()
+        from session_search.storage.verification_jobs import VerificationJobs
+        job_config = tmp_path / 'job-repositories.json'
+        job_config.write_text(json.dumps({'repositories': [
+            {'name': r.name, 'repository': r.repository, 'password_file': str(r.password_file),
+             'restore_directory': str(restore_directory)} for r in repositories]}))
+        jobs = VerificationJobs(tmp_path / 'jobs', job_config, receipt_path)
+        job = jobs.submit('test', 'a' * 64, requirements)
+        assert job['status'] == 'queued'
+        assert jobs.submit('test', 'b' * 64, requirements)['status'] == 'busy'
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            polled = jobs.poll('test', job['job_id'])
+            if polled['status'] not in {'queued', 'running'}:
+                break
+            time.sleep(0.05)
+        assert polled['status'] == 'restore_verified'
+        assert polled['proof']['requirements_digest'] == proof['requirements_digest']
+        # A replacement HTTP manager can poll the durable result, but another
+        # device receives no indication that this job belongs to somebody else.
+        replacement_jobs = VerificationJobs(tmp_path / 'jobs', job_config, receipt_path)
+        assert replacement_jobs.poll('test', job['job_id']) == polled
+        assert jobs.poll('other', job['job_id'])['status'] == 'unavailable'
+        assert source.exists()
         wrong_size = [{**requirements[0], "size": requirements[0]["size"] + 1}]
         with pytest.raises(ValueError, match="absent from a backup"):
             offload.verify_offload_backups(result, wrong_size, repositories)

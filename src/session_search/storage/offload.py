@@ -65,13 +65,16 @@ def plan_offload(catalog: Catalog, receipt_file: Path, *, now: float | None = No
 
 
 def verify_offload_backups(receipt: dict, candidates: list[dict],
-                           repositories: list[ResticRepository]) -> dict:
+                           repositories: list[ResticRepository], *, reserve_bytes: int = 2 * 1024 ** 3) -> dict:
     """Freshly restore all required backups; never read or remove native files.
 
     The returned report is verification evidence, not an offline deletion permit.
     Remote callers must bind it to an authenticated request and recheck local files.
     """
     import re
+    import shutil
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise ValueError('invalid restore reserve')
     if (not isinstance(receipt, dict) or receipt.get("version") != 1
             or receipt.get("status") != "restore_verified"):
         raise ValueError("verified version 1 backup receipts are required")
@@ -118,6 +121,12 @@ def verify_offload_backups(receipt: dict, candidates: list[dict],
         actual = json.loads(repository.run(["cat", "config"]))["id"]
         if actual != receipt["repository_id"]:
             raise ValueError("backup repository identity changed")
+        statistics = json.loads(repository.run(['stats', receipt['backup_id'], '--mode', 'restore-size', '--json']))
+        required = statistics.get('total_size')
+        if type(required) is not int or required < 0:
+            raise ValueError('invalid backup restore size')
+        if shutil.disk_usage(repository.restore_directory or tempfile.gettempdir()).free < required + reserve_bytes:
+            raise OSError('insufficient restore workspace capacity')
         with tempfile.TemporaryDirectory(prefix="session-search-offload-verify-",
                                          dir=repository.restore_directory) as root:
             repository.run(["restore", receipt["backup_id"], "--target", root])

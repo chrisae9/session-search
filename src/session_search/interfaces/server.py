@@ -18,7 +18,18 @@ from session_search.storage.catalog import Catalog
 from session_search.storage.fencing import WriteFenced
 
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
-               provider=None, chunk_raw: bool = False) -> FastAPI:
+               provider=None, chunk_raw: bool = False,
+               offload_repositories: Path | None = None,
+               offload_receipt: Path | None = None) -> FastAPI:
+    if bool(offload_repositories) != bool(offload_receipt):
+        raise ValueError('offload verification requires repositories and a recovery receipt')
+    if readonly and offload_repositories:
+        raise ValueError('standbys cannot run offload verification')
+    verification = None
+    if offload_repositories:
+        from session_search.storage.verification_jobs import VerificationJobs
+        verification = VerificationJobs(data_dir / 'offload-verifications',
+                                        offload_repositories, offload_receipt)
     app = FastAPI(title="Session Search", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -54,6 +65,39 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
 
     def read():
         return Catalog(data_dir.resolve(), readonly=True)
+
+    @app.post('/v1/offload-verifications')
+    def submit_verification(data: dict, request: Request):
+        if readonly:
+            raise HTTPException(409, 'standby cannot verify offload')
+        if verification is None:
+            raise HTTPException(503, 'offload verification is not configured')
+        if set(data) != {'nonce', 'requirements'}:
+            raise ValueError('invalid verification request fields')
+        requirements = data['requirements']
+        if not isinstance(requirements, list) or not 1 <= len(requirements) <= 100:
+            raise ValueError('verification accepts 1–100 raw requirements')
+        with read() as catalog:
+            for row in requirements:
+                if not isinstance(row, dict):
+                    raise ValueError('invalid raw requirement')
+                owned = catalog.db.execute(
+                    'SELECT 1 FROM raw_sources s JOIN producers p '
+                    'ON p.session_id=s.session_id AND p.revision=s.revision '
+                    'WHERE s.session_id=? AND s.revision=? AND s.digest=? AND s.size=? AND p.producer=?',
+                    (row['session_id'], row['revision'], row['digest'], row['size'], request.state.producer),
+                ).fetchone()
+                if not owned:
+                    raise HTTPException(403, 'raw requirement is not acknowledged for this device')
+        return verification.submit(request.state.producer, data['nonce'], requirements)
+
+    @app.get('/v1/offload-verifications/{job_id}')
+    def poll_verification(job_id: str, request: Request):
+        if readonly:
+            raise HTTPException(409, 'standby cannot verify offload')
+        if verification is None:
+            raise HTTPException(503, 'offload verification is not configured')
+        return verification.poll(request.state.producer, job_id)
 
     @app.get("/v1/status")
     def status():
