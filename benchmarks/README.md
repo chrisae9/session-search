@@ -7,3 +7,26 @@ Run `uv run python benchmarks/evaluate_retrieval.py` with a new `--data-dir` and
 The runner refuses existing data/output paths, captures the dataset digest and model identity, and reports recall@10, MRR@10, top-one accuracy, and median/p95 query latency. Configured embedding runs also measure a vector-only cosine baseline to distinguish model ranking from hybrid rank merging. That diagnostic loads the small synthetic vector set into memory; it is not the production query path. With one designated relevant session, recall@10 equals the fraction of queries that found it in the first ten results. A degraded hybrid run fails rather than reporting keyword fallback as model quality.
 
 Use the same dataset digest when comparing runs. The catalog has only 50 sessions, so latency is not representative of a production corpus. These checks complement whole-corpus latency tests and private relevance evaluations; they do not establish either. Keep machine-specific measurements and private evaluation sets outside the repository.
+
+
+## Capture append evaluation
+
+`compare_capture.py` compares the incremental parser engine with an independent
+full parse after each of two synthetic appends. Supply a stable complete-record
+Codex JSONL file, a scratch directory with room for a separate source copy plus
+2 GiB, and a new output path outside the checkout:
+
+```sh
+uv run python benchmarks/compare_capture.py SESSION_JSONL --scratch SCRATCH_DIRECTORY --output REPORT_JSON
+```
+
+For a content-addressed raw object, pass `--filename` with its original rollout
+basename so ownership detection uses the correct session identity. The runner
+writes only to an independent temporary copy, checks exact normalized revisions,
+and verifies the original source hash after both comparisons. It reports timings,
+event reuse, scan offsets, and source identity without transcript excerpts.
+
+The first parse builds an in-memory checkpoint. Append timings include complete
+prefix verification but exclude staging, raw archival, upload, and any future
+persistent cache serialization. They do not establish end-to-end capture latency
+or performance on other machines. Keep private-source reports outside the repo.
