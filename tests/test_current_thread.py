@@ -13,6 +13,30 @@ from session_search.storage.catalog import Catalog
 from session_search.storage.semantic import index_pending
 
 
+def test_shared_mcp_uses_per_call_identity_and_reports_missing_context(tmp_path, monkeypatch):
+    from session_search.core.records import Event, SessionRevision
+    with Catalog(tmp_path) as catalog:
+        for sid, parent in [('first', None), ('child', 'first'), ('second', None)]:
+            catalog.ingest(SessionRevision(sid, (Event('e', 'user', 'recovery'),),
+                                           parent_session_id=parent), producer='d', request_id=sid)
+    monkeypatch.setenv('CODEX_THREAD_ID', 'second')
+
+    async def run():
+        server = create_mcp(tmp_path)
+        async def search(**options):
+            response = await server.call_tool('search', {'text': 'recovery', **options})
+            result = json.loads(response[0].text)
+            return {r['citation']['session_id'] for r in result['results']}, result['current_thread_exclusion']
+        assert await search(current_session_id='first') == ({'second'}, 'applied')
+        assert await search(current_session_id='second') == ({'first', 'child'}, 'applied')
+        assert await search() == ({'first', 'child'}, 'applied')
+        monkeypatch.delenv('CODEX_THREAD_ID')
+        assert await search() == ({'first', 'child', 'second'}, 'unknown')
+        assert await search(current_session_id='first', include_current_session=True,
+                            exclude_sessions=['second']) == ({'first', 'child'}, 'disabled_by_request')
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('semantic', [False, True])
 @pytest.mark.parametrize('remote', [False, True])
 def test_captured_current_tree_is_excluded_in_cli_and_mcp(

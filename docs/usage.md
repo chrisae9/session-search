@@ -39,6 +39,14 @@ its result; an old successful run does not establish current capture freshness.
 
 Launch `.venv/bin/session-search --data-dir demo-state/local mcp` as a stdio MCP server. It exposes only `search`, `context`, and `status`; capture and administrative maintenance are separate CLI operations. The MCP adapter returns one bounded text payload per tool call to avoid duplicating evidence in structured and text outputs.
 
+Pass the calling thread ID as `current_session_id` on MCP searches. It takes
+precedence over `CODEX_THREAD_ID` in the server environment, which a shared host
+may omit or retain from another thread. The response reports
+`current_thread_exclusion`: `applied`, `unknown`, or `disabled_by_request`.
+`include_current_session` disables automatic exclusion; explicit
+`exclude_sessions` filters still apply. Never pin one conversation's ID in shared
+server configuration.
+
 For Codex, register the installed executable as a stdio server. For a local-only
 store:
 

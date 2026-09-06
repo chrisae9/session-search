@@ -62,14 +62,18 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
                project: str | None = None, session_id: str | None = None,
                producer: str | None = None, include_subagents: bool = False,
                include_current_session: bool = False, exclude_sessions: list[str] | None = None,
-               limit: int = 10, budget: int = 16384) -> str:
-        """Find past evidence. Preserve citations for context; check coverage before negative claims."""
+               limit: int = 10, budget: int = 16384, current_session_id: str | None = None) -> str:
+        """Find past evidence. Pass current_session_id for thread exclusion on shared MCP hosts."""
         exclude = list(exclude_sessions or [])
-        if not include_current_session and os.environ.get("CODEX_THREAD_ID"):
-            exclude.append(os.environ["CODEX_THREAD_ID"])
+        current = current_session_id or os.environ.get("CODEX_THREAD_ID")
+        if not include_current_session and current:
+            exclude.append(current)
         query = SearchQuery(text, literal, role, after, before, project, session_id, producer,
                             tuple(exclude), include_subagents, limit)
-        return canonical_json(bounded_response(await dispatch(invoke, "search", asdict(query)), budget))
+        result = await dispatch(invoke, "search", asdict(query))
+        result['current_thread_exclusion'] = ('disabled_by_request' if include_current_session
+                                              else 'applied' if current else 'unknown')
+        return canonical_json(bounded_response(result, budget))
 
     @server.tool(annotations=annotations, structured_output=False)
     async def context(citations: list[dict], neighbors: int = 2, budget: int = 32768) -> str:
