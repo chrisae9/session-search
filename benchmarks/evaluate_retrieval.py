@@ -15,6 +15,15 @@ from session_search.storage.catalog import Catalog
 from session_search.storage.semantic import hybrid_search, index_pending
 
 
+def summarize(rows):
+    durations = sorted(row['milliseconds'] for row in rows)
+    return {'queries': len(rows), 'recall_at_10': sum(r['rank'] is not None for r in rows) / len(rows),
+            'mrr_at_10': sum(1 / r['rank'] if r['rank'] else 0 for r in rows) / len(rows),
+            'top_one': sum(r['rank'] == 1 for r in rows) / len(rows),
+            'latency_ms': {'median': statistics.median(durations),
+                           'p95': durations[math.ceil(len(durations) * .95) - 1]}, 'cases': rows}
+
+
 def evaluate(catalog, cases, provider=None):
     rows = []
     for case in cases:
@@ -26,12 +35,35 @@ def evaluate(catalog, cases, provider=None):
                      if hit['citation']['session_id'] == expected), None)
         rows.append({'case': expected, 'rank': rank, 'milliseconds': round(elapsed * 1000, 3),
                      'mode': result.get('mode', 'keyword')})
-    durations = sorted(row['milliseconds'] for row in rows)
-    return {'queries': len(rows), 'recall_at_10': sum(r['rank'] is not None for r in rows) / len(rows),
-            'mrr_at_10': sum(1 / r['rank'] if r['rank'] else 0 for r in rows) / len(rows),
-            'top_one': sum(r['rank'] == 1 for r in rows) / len(rows),
-            'latency_ms': {'median': statistics.median(durations),
-                           'p95': durations[math.ceil(len(durations) * .95) - 1]}, 'cases': rows}
+    return summarize(rows)
+
+
+def evaluate_vectors(catalog, cases, provider):
+    """Small-corpus exact cosine baseline, separate from production rank merging."""
+    import numpy as np
+    from session_search.core.embeddings import validate_vector
+    vectors = catalog.db.execute(
+        'SELECT e.session_id,v.vector FROM events e JOIN heads h '
+        'ON e.session_id=h.session_id AND e.revision=h.revision '
+        'JOIN event_chunks ec ON e.row_id=ec.event_row JOIN vectors v '
+        'ON ec.content_hash=v.content_hash WHERE v.identity=? AND e.role=?',
+        (provider.identity.key, 'assistant'),
+    ).fetchall()
+    matrix = np.stack([np.frombuffer(r['vector'], dtype='<f4') for r in vectors])
+    rows = []
+    for case in cases:
+        start = time.perf_counter()
+        query = np.asarray(validate_vector(provider.embed(case['query'], query=True),
+                                          provider.identity.dimensions), dtype='<f4')
+        scores = {}
+        for row, score in zip(vectors, matrix @ query):
+            key = row['session_id']
+            scores[key] = max(scores.get(key, -float('inf')), float(score))
+        ranked = sorted(scores, key=lambda key: (-scores[key], key))[:10]
+        rank = next((i for i, key in enumerate(ranked, 1) if key == case['id']), None)
+        rows.append({'case': case['id'], 'rank': rank, 'mode': 'vector',
+                     'milliseconds': round((time.perf_counter() - start) * 1000, 3)})
+    return summarize(rows)
 
 
 def main():
@@ -70,6 +102,7 @@ def main():
             result['indexing'] = {'vectors': total, 'seconds': round(time.perf_counter() - start, 3)}
             result['embedding_identity'] = asdict(provider.identity)
             result['hybrid'] = evaluate(catalog, cases, provider)
+            result['vector'] = evaluate_vectors(catalog, cases, provider)
             if any(row['mode'] != 'hybrid' for row in result['hybrid']['cases']):
                 raise RuntimeError('hybrid benchmark fell back; do not report it as model quality')
     args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -78,7 +111,7 @@ def main():
         json.dump(result, output, indent=2)
         output.write('\n')
     print(json.dumps({key: {k: v for k, v in result[key].items() if k != 'cases'}
-                      for key in ('keyword', 'hybrid') if key in result}))
+                      for key in ('keyword', 'hybrid', 'vector') if key in result}))
 
 
 if __name__ == '__main__':
