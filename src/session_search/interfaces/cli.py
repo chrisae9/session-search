@@ -33,6 +33,7 @@ def parser() -> argparse.ArgumentParser:
     legacy.add_argument("--allow-superseded-conflicts", action="store_true",
                         help="permit conflicting old revisions only when a unique newer revision exists")
     commands.add_parser("status", help="inspect catalog coverage")
+    commands.add_parser("compact-client", help="reclaim acknowledged upload payload pages when idle")
     snapshot = commands.add_parser("snapshot", help="create a consistent verified backup input")
     snapshot.add_argument("destination", type=Path)
     snapshot.add_argument("--search-only", action="store_true",
@@ -211,6 +212,13 @@ def main(argv=None) -> int:
                 raise ValueError("flush requires remote mode")
             with UploadQueue(args.data_dir) as queue:
                 output = queue.flush(client, limit=args.limit, bootstrap_imports=args.bootstrap_imports)
+            print(canonical_json(output))
+            return 0
+        if args.command == "compact-client":
+            if not (args.data_dir / "upload-queue.sqlite3").is_file():
+                raise ValueError("client upload queue is not initialized")
+            with UploadQueue(args.data_dir) as queue:
+                output = queue.compact()
             print(canonical_json(output))
             return 0
         if client:

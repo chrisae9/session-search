@@ -4,8 +4,9 @@ import json
 import fcntl
 import sqlite3
 import time
+import shutil
 from dataclasses import asdict
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 
 from session_search.core.records import SessionRevision, canonical_json
@@ -96,6 +97,36 @@ class UploadQueue:
         with (self.root / ".capture.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             yield
+
+    def compact(self) -> dict:
+        """Reclaim acknowledged payload pages without discarding any queue records."""
+        with ExitStack() as locks:
+            for name in (".flush.lock", ".capture.lock"):
+                lock = locks.enter_context((self.root / name).open("a"))
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return {"version": 1, "status": "deferred", "reason": "client_busy"}
+            if self.status()["pending"]:
+                return {"version": 1, "status": "deferred", "reason": "pending_work"}
+            page_size = self.db.execute("PRAGMA page_size").fetchone()[0]
+            unused = self.db.execute("PRAGMA freelist_count").fetchone()[0] * page_size
+            if unused < 1024 * 1024:
+                return {"version": 1, "status": "unchanged", "reclaimed_bytes": 0}
+            allocated = self.db.execute("PRAGMA page_count").fetchone()[0] * page_size
+            if shutil.disk_usage(self.root).free < allocated * 3 + 64 * 1024 * 1024:
+                return {"version": 1, "status": "deferred", "reason": "insufficient_scratch_space"}
+            if self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                return {"version": 1, "status": "deferred", "reason": "database_busy"}
+            path = self.root / "upload-queue.sqlite3"
+            before = path.stat().st_size
+            self.db.execute("VACUUM")
+            checkpoint = self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if checkpoint[0]:
+                return {"version": 1, "status": "deferred", "reason": "checkpoint_busy"}
+            return {"version": 1, "status": "compacted", "before_bytes": before,
+                    "after_bytes": path.stat().st_size,
+                    "reclaimed_bytes": max(0, before - path.stat().st_size)}
 
     def flush(self, client: Client, *, limit: int = 100, now: float | None = None,
               bootstrap_imports: bool = False) -> dict:

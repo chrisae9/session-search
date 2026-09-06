@@ -9,6 +9,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Shared immutable evidence records and compressed revision maps; unchanged text is not copied for each growing revision.
 - [x] Immutable bounded context and CLI.
 - [x] Durable upload queue and complete-record capture checkpoints.
+- [x] Idle client queue compaction that preserves acknowledgements and capture checkpoints.
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
 - [x] Process-shared background embedding admission and bounded retries during provider outages.
 - [x] Three read-only MCP tools and authenticated HTTP transport.

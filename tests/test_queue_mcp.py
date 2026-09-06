@@ -94,3 +94,55 @@ def test_mcp_has_exactly_three_readonly_tools_and_matches_catalog(tmp_path):
         assert json.loads(expanded[0].text)["results"][0]["events"][0]["text"] == "restore evidence"
 
     asyncio.run(run())
+
+
+def test_client_compaction_preserves_recovery_checkpoints_and_pending_work(tmp_path, monkeypatch):
+    import hashlib
+    from types import SimpleNamespace
+    from session_search.capture import queue as queue_module
+    from session_search.storage.objects import ObjectStore
+
+    root = tmp_path / 'client'
+    source = tmp_path / 'synthetic.jsonl'
+    source.write_bytes(b'synthetic original')
+    raw = {**ObjectStore(root).put(source), 'path': str(source), 'fingerprint': 'stable'}
+    session = revision('a', 'retained evidence ' + 'x' * (2 * 1024 * 1024))
+
+    class Online:
+        def upload_raw(self, path, digest):
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+
+        def upload(self, payload):
+            return {'status': 'durable', 'revision': session.revision}
+
+    with UploadQueue(root) as queue:
+        queue.ingest(session, producer='device', request_id='one',
+                     checkpoint=(str(source), 'stable'), raw=raw)
+        for state in ('pending', 'conflict', 'rejected'):
+            with queue.db:
+                queue.db.execute('UPDATE pending SET state=?', (state,))
+            assert queue.compact()['reason'] == 'pending_work'
+            assert queue.status()['states'] == {state: 1}
+        with queue.db:
+            queue.db.execute("UPDATE pending SET state='pending'")
+        assert queue.flush(Online())['sent'] == 1
+        with queue.capture_guard():
+            assert queue.compact()['reason'] == 'client_busy'
+        with monkeypatch.context() as patch:
+            patch.setattr(queue_module.shutil, 'disk_usage', lambda _: SimpleNamespace(free=0))
+            assert queue.compact()['reason'] == 'insufficient_scratch_space'
+        compacted = queue.compact()
+        assert compacted['status'] == 'compacted'
+        assert compacted['reclaimed_bytes'] > 1024 * 1024
+    with UploadQueue(root) as reopened:
+        assert reopened.db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+        assert reopened.fingerprint(str(source)) == 'stable'
+        assert reopened.has_raw(str(source), 'stable')
+        assert reopened.db.execute('SELECT revision FROM acknowledged').fetchone()[0] == session.revision
+        assert reopened.status()['pending'] == 0
+        assert reopened.compact()['status'] == 'unchanged'
+        # A later capture still chains to the acknowledged head after compaction.
+        reopened.ingest(revision('a', 'later evidence'), producer='device', request_id='two')
+        payload = json.loads(reopened.db.execute('SELECT payload FROM pending').fetchone()[0])
+        assert payload['expected_revision'] == session.revision
+        assert source.read_bytes() == b'synthetic original'
