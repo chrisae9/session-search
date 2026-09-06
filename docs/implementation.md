@@ -18,6 +18,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Resumable SSH snapshot publication, unchanged-publication skipping, and five-minute timer templates.
 - [x] Two-repository Restic restore verification and guarded manual offload primitives.
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
+- [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [ ] Incremental parsing of appended records without reparsing the changed session.
 - [x] Resumable raw-object transfer from lightweight clients.
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
@@ -25,7 +26,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Explicit first-upload checkpoint adoption for legacy imports, with concurrent-update conflict protection.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
-- [ ] Offline installation, quality/performance evaluations, and migration.
+- [ ] Offline installation with MCP/local inference extras, quality/performance evaluations, and migration.
 - [ ] Provenance clearance, GitHub publication, and deployment.
 
 Existing production storage remains separate. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload coordination still needs to be connected to server-side recovery verification.

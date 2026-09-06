@@ -54,6 +54,10 @@ Local artifacts require `identity.artifact` to equal `sha256:` followed by the m
 
 Run `embed --limit 100` with the same data directory and embedding configuration to process a bounded backlog. Searches with that configuration use hybrid retrieval and report keyword fallback if the provider fails. Literal searches never request embeddings.
 
+## Offline core verification
+
+The core wheel has no third-party dependencies. After building it, run `python tests/check_offline_wheel.py dist` to install it into a clean environment with package-manager networking disabled. The installed CLI scenario also blocks Python socket operations and external processes, and runs without optional packages. It covers capture, search, immutable context, missing-model fallback, and snapshots. This checks the core distribution; offline MCP and local inference bundles require their optional dependencies and model artifacts separately.
+
 ## Recovery development
 
 `snapshot DESTINATION` uses SQLite's backup API and includes referenced raw objects. `verify-snapshot SNAPSHOT` verifies the database checksum, database references, and every raw object. `activate-replica SNAPSHOT` stages and verifies a copy before switching the replica's current generation.
