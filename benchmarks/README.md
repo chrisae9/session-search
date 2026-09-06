@@ -26,7 +26,15 @@ writes only to an independent temporary copy, checks exact normalized revisions,
 and verifies the original source hash after both comparisons. It reports timings,
 event reuse, scan offsets, and source identity without transcript excerpts.
 
-The first parse builds an in-memory checkpoint. Append timings include complete
-prefix verification but exclude staging, raw archival, upload, and any future
-persistent cache serialization. They do not establish end-to-end capture latency
-or performance on other machines. Keep private-source reports outside the repo.
+The default measures an in-memory checkpoint. Add `--persistent-cache` to save
+that checkpoint, discard it from memory, and load and atomically save a checkpoint
+for each append. That mode includes cache I/O, serialization, and complete prefix
+verification in `incremental_seconds`; separate load, parser, save, and cache-byte
+fields show the costs. Failed cache saves or loads stop the benchmark instead of
+silently measuring a full-parse fallback.
+
+Both modes exclude capture staging, raw archival, and upload. They run within one
+process, with the incremental path before the reference full parse, so OS page
+cache and ordering can affect timings. They do not establish end-to-end capture
+latency, cold-start performance, or performance on other machines. Keep
+private-source reports outside the repo.

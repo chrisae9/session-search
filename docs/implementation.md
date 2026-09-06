@@ -39,6 +39,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Incremental parser engine with complete-prefix verification, original line boundaries, and ownership-change fallback.
 - [x] Bounded atomic parser checkpoints and opt-in capture/sync integration with full-parse fallback.
 - [x] Mac persistent-cache capture/queue qualification, scheduled pilot reuse, and MCP status verification.
+- [x] Persistent-checkpoint benchmark including load/save costs, with exact synthetic append parity on macOS and Linux.
 - [ ] Broader persistent-cache performance qualification across clients.
 - [x] Chunk-backed catalog acknowledgement, version 2 snapshots, dual Restic restoration, and replacement-primary preparation.
 - [x] Opt-in server raw-upload chunking with the existing client protocol, shared-prefix reuse, and publication retry recovery.

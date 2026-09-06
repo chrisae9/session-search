@@ -8,6 +8,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from session_search.capture.checkpoints import CheckpointCache
 from session_search.capture.incremental import parse_incremental
 from session_search.capture.local import normalize_session
 from session_search.capture.parsers.codex import CodexParser
@@ -18,7 +19,7 @@ def file_hash(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def compare(source, scratch, *, filename=None):
+def compare(source, scratch, *, filename=None, persistent_cache=False):
     filename = filename or source.name
     if Path(filename).name != filename or filename in {"", ".", ".."}:
         raise ValueError("rollout filename must be a basename")
@@ -26,7 +27,8 @@ def compare(source, scratch, *, filename=None):
     if shutil.disk_usage(scratch).free < size + 2 * 1024 ** 3:
         raise ValueError("insufficient scratch space")
     before = file_hash(source)
-    report = {"source_bytes": size, "source_sha256": before, "appends": []}
+    report = {"source_bytes": size, "source_sha256": before,
+              "persistent_cache": persistent_cache, "appends": []}
     with tempfile.TemporaryDirectory(prefix="capture-comparison-", dir=scratch) as work:
         path = Path(work) / filename
         shutil.copyfile(source, path)
@@ -39,6 +41,13 @@ def compare(source, scratch, *, filename=None):
         del initial
         if checkpoint is None:
             raise ValueError("source has no checkpointable owned turn")
+        cache_root = Path(work) / 'checkpoints'
+        if persistent_cache:
+            started = time.monotonic()
+            if not CheckpointCache(cache_root).save(path, checkpoint):
+                raise ValueError('initial checkpoint was not saved')
+            report['initial_cache_save_seconds'] = round(time.monotonic() - started, 6)
+            del checkpoint
         for index in range(2):
             with path.open("a") as stream:
                 for role in ("user", "assistant"):
@@ -48,16 +57,32 @@ def compare(source, scratch, *, filename=None):
                             {"type": "input_text", "text": f"synthetic append {index} {role}"}]},
                     }) + "\n")
             started = time.monotonic()
+            if persistent_cache:
+                checkpoint = CheckpointCache(cache_root).load(path)
+                if checkpoint is None:
+                    raise ValueError('persistent checkpoint was not loaded')
+            loaded = time.monotonic()
             actual, checkpoint, work_counts = parse_incremental(path, checkpoint)
-            incremental = time.monotonic() - started
-            started = time.monotonic()
+            parsed = time.monotonic()
+            if persistent_cache:
+                if not CheckpointCache(cache_root).save(path, checkpoint):
+                    raise ValueError('updated checkpoint was not saved')
+                del checkpoint
+            saved = time.monotonic()
+            incremental = saved - started
+            full_started = time.monotonic()
             reference = normalize_session(CodexParser(
                 session_index=path.parent / "no-index", strict=True).parse_session(path))
-            full = time.monotonic() - started
+            full = time.monotonic() - full_started
             assert actual == reference and actual.revision == reference.revision, "revision parity failed"
             row = {"append": index + 1, "incremental_seconds": round(incremental, 3),
                    "full_seconds": round(full, 3), "exact_revision_parity": True,
                    "events": len(actual.events), "work": work_counts}
+            if persistent_cache:
+                row.update(cache_load_seconds=round(loaded - started, 6),
+                           parser_seconds=round(parsed - loaded, 6),
+                           cache_save_seconds=round(saved - parsed, 6),
+                           cache_bytes=sum(p.stat().st_size for p in cache_root.glob('*.cache')))
             report["appends"].append(row)
             print(json.dumps(row), flush=True)
             del actual, reference
@@ -72,10 +97,13 @@ def main():
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--filename", help="original rollout basename when input is a raw object")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--persistent-cache", action="store_true",
+                        help="include checkpoint loading and atomic saving in append timings")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError("report already exists")
-    report = compare(args.source, args.scratch, filename=args.filename)
+    report = compare(args.source, args.scratch, filename=args.filename,
+                     persistent_cache=args.persistent_cache)
     with args.output.open("x") as stream:
         args.output.chmod(0o600)
         json.dump(report, stream, indent=2)
