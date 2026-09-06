@@ -42,6 +42,11 @@ class RawTransfers:
                     "offset": partial.stat().st_size if partial.exists() else 0}
 
     def append(self, producer: str, key: str, offset: int, total: int, chunk: bytes) -> dict:
+        from session_search.storage.fencing import writer_lease
+        with writer_lease(self.root):
+            return self._append(producer, key, offset, total, chunk)
+
+    def _append(self, producer: str, key: str, offset: int, total: int, chunk: bytes) -> dict:
         if not 0 <= offset <= total <= self.max_size or len(chunk) > MAX_CHUNK:
             raise ValueError("invalid transfer size or offset")
         if offset + len(chunk) > total or (not chunk and offset != total):

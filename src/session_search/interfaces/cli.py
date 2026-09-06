@@ -34,6 +34,7 @@ def parser() -> argparse.ArgumentParser:
                         help="permit conflicting old revisions only when a unique newer revision exists")
     commands.add_parser("status", help="inspect catalog coverage")
     commands.add_parser("compact-client", help="reclaim acknowledged upload payload pages when idle")
+    commands.add_parser("fence-primary", help="prevent further cooperating local catalog and transfer writes")
     snapshot = commands.add_parser("snapshot", help="create a consistent verified backup input")
     snapshot.add_argument("destination", type=Path)
     snapshot.add_argument("--search-only", action="store_true",
@@ -241,6 +242,13 @@ def main(argv=None) -> int:
                                      reconcile_raw_prefixes=args.reconcile_raw_prefixes)
             print(canonical_json(output))
             return 0
+        if args.command == "fence-primary":
+            from session_search.storage.fencing import fence_primary
+            if client:
+                raise ValueError("primary fencing runs locally on the data host")
+            output = fence_primary(args.data_dir)
+            print(canonical_json(output))
+            return 0 if output["status"] == "fenced" else 2
         if args.command == "compact-client":
             if not (args.data_dir / "upload-queue.sqlite3").is_file():
                 raise ValueError("client upload queue is not initialized")

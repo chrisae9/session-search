@@ -106,6 +106,7 @@ class Catalog:
         self.root = Path(root)
         self.readonly = readonly
         self._generation_pin = None
+        self._writer_pin = None
         current = self.root / "CURRENT"
         if current.exists():
             if not readonly:
@@ -127,6 +128,8 @@ class Catalog:
             self.db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=10)
         else:
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            from session_search.storage.fencing import acquire_writer
+            self._writer_pin = acquire_writer(self.root)
             self.db = sqlite3.connect(path, timeout=10)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -146,6 +149,9 @@ class Catalog:
     def close(self):
         if hasattr(self, "db"):
             self.db.close()
+        if self._writer_pin is not None:
+            self._writer_pin.close()
+            self._writer_pin = None
         if self._generation_pin is not None:
             self._generation_pin.close()
             self._generation_pin = None
@@ -394,6 +400,7 @@ class Catalog:
         ).fetchone()
         result = {"sessions": row["sessions"], "events": row["events"],
                   "publication": self.publication(),
+                  "write_fenced": (self.root / "FENCED.json").exists(),
                   "semantic_indexed": None,
                   "replication": {"status": "not_configured"}, "backup": "not_configured"}
         receipts = self.root / "replication-receipts"

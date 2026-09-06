@@ -36,3 +36,19 @@ For native Codex sessions with raw archival enabled, `flush --reconcile-raw-pref
 If a primary has been restored from an older backup, surviving client checkpoints can incorrectly consider newer local files already captured. After completing operator-controlled primary recovery, use `capture --archive-raw --force` to queue those local files again, then `flush --reconcile-raw-prefixes` until the queue drains. Forced capture rereads and stages the discovered files; allow space for those transfer copies. Ordinary capture continues to skip unchanged files.
 
 Divergent or shorter raw files, unavailable staging, and existing heads without archived raw evidence remain conflicts. Inspect these cases explicitly; the reconciliation option does not force an overwrite or invent ancestry. It does not replace primary fencing, recover missing native files, or promote a read-only restored snapshot.
+
+## Fence a primary before replacement
+
+Stop capture, indexing, upload, and replication writers on the old primary, then run
+`session-search --data-dir DATA_DIR fence-primary` on that host. A `busy` result
+(exit 2) means a participating catalog or transfer writer still holds a lease;
+stop it and retry. A `fenced` receipt (exit 0) records the publication and prevents
+new participating catalog and transfer writes. Search and immutable context remain
+available. Repeating the command returns the same receipt when the publication
+has not changed. There is no automatic unfence command.
+
+This is a cooperative local fence, not distributed promotion. Older binaries and
+external database writers do not honor its lock. Stop those processes and isolate
+the old host from client traffic before starting a replacement primary. Do not
+remove the fence marker to reuse an old primary. Preparing and activating a writable
+replacement from verified recovery media remains a separate recovery step.

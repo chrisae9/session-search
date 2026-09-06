@@ -15,6 +15,7 @@ from session_search.core.output import bounded_response
 from session_search.core.protocol import MAX_REQUEST, MAX_REVISION_UPLOAD
 from session_search.core.records import Event, SearchQuery, SessionRevision
 from session_search.storage.catalog import Catalog
+from session_search.storage.fencing import WriteFenced
 
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                provider=None) -> FastAPI:
@@ -46,6 +47,8 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         request._body = bytes(body)
         try:
             return await call_next(request)
+        except WriteFenced:
+            return JSONResponse({"version": 1, "status": "primary_fenced"}, status_code=503)
         except (ValueError, TypeError, KeyError):
             return JSONResponse({"version": 1, "status": "invalid_request"}, status_code=400)
 

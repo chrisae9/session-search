@@ -27,6 +27,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Resumable large normalized payloads, isolated from raw archival, with bounded ingestion admission.
 - [x] Verified legacy archive importer and immutable historical turn/event locator aliases.
 - [x] Explicit first-upload checkpoint adoption for legacy imports, with concurrent-update conflict protection.
+- [x] Cooperative local primary write fencing with active-writer detection and preserved read access.
 - [x] Raw-prefix checkpoint reconciliation and forced recapture after client loss or an older primary restore.
 - [ ] Background scheduling, global embedding admission control, and bounded maintenance retention.
 - [ ] Live cross-host rollout, credential revocation propagation, and recovery automation.
