@@ -21,6 +21,27 @@ Add `--archive-raw` to capture only when exact raw files should be retained. Raw
 
 Launch `.venv/bin/session-search --data-dir demo-state/local mcp` as a stdio MCP server. It exposes only `search`, `context`, and `status`; capture and administrative maintenance are separate CLI operations. The MCP adapter returns one bounded text payload per tool call to avoid duplicating evidence in structured and text outputs.
 
+For Codex, register the installed executable as a stdio server. For a local-only
+store:
+
+```sh
+codex mcp add session-search -- /absolute/path/session-search \
+  --data-dir /absolute/path/store mcp
+```
+
+For a lightweight remote client, add `--primary`, `--standby`, and `--token-file`
+before `mcp`, using the same configuration as the CLI examples below. Credentials
+remain in the token file; do not put token values in command arguments. Install the
+`mcp` extra on the client; remote clients do not need the embedding extra or model
+files. The server configuration applies when Codex loads its MCP connections.
+
+The optional [agent skill](../skills/session-search/SKILL.md) explains evidence
+selection, immutable context, and coverage limits. It uses the three MCP tools and
+does not trigger capture or maintenance during search. When replacing a legacy
+skill, preserve its runtime data separately and avoid installing two skills with
+the same name. Registering MCP alone does not replace legacy skill instructions.
+
+
 ## HTTP server and client
 
 ```sh
