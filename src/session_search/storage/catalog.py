@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS active_events (
  session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, event_row INTEGER NOT NULL REFERENCES evidence(row_id),
  PRIMARY KEY(session_id,ordinal)
 );
+CREATE INDEX IF NOT EXISTS active_events_by_evidence ON active_events(event_row);
 CREATE VIEW IF NOT EXISTS events AS SELECT b.*,h.revision,a.ordinal FROM evidence b
  JOIN active_events a ON a.event_row=b.row_id JOIN heads h ON h.session_id=a.session_id;
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(text, tokenize='unicode61');

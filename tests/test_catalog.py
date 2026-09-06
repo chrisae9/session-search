@@ -103,3 +103,23 @@ def test_growing_sessions_share_unchanged_evidence_between_revisions(tmp_path):
         assert catalog.db.execute("SELECT COUNT(*) FROM evidence").fetchone()[0] == 50
         assert catalog.db.execute("SELECT COUNT(*) FROM evidence_fts").fetchone()[0] == 50
         assert catalog.db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 50
+
+
+def test_older_catalog_lookup_index_upgrade_preserves_history_and_readonly_access(tmp_path):
+    with Catalog(tmp_path) as catalog:
+        catalog.ingest(session(), producer="device", request_id="first")
+        citation = catalog.search(SearchQuery("restore"))["results"][0]["citation"]
+        publication = catalog.publication()
+        catalog.db.execute("DROP INDEX active_events_by_evidence")
+        catalog.db.commit()
+    with Catalog(tmp_path, readonly=True) as catalog:
+        assert catalog.search(SearchQuery("restore"))["results"][0]["citation"] == citation
+        assert not catalog.db.execute("SELECT 1 FROM sqlite_master WHERE name='active_events_by_evidence'").fetchone()
+    with Catalog(tmp_path) as catalog:
+        assert catalog.db.execute("SELECT 1 FROM sqlite_master WHERE name='active_events_by_evidence'").fetchone()
+        assert catalog.publication() == publication
+        assert catalog.search(SearchQuery("restore"))["results"][0]["citation"] == citation
+        catalog.ingest(session("continued work"), producer="device", request_id="second")
+        assert not catalog.search(SearchQuery("restore"))["results"]
+        assert catalog.context([citation])["results"][0]["events"][0]["text"] == "backup restore"
+        assert catalog.db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
