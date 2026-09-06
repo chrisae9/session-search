@@ -313,7 +313,9 @@ def main(argv=None) -> int:
         write = args.command in {"init", "capture"}
         with Catalog(args.data_dir.resolve(), readonly=not write) as catalog:
             if args.command in {"init", "status"}:
-                output = {"version": 1, "status": "ok", "coverage": catalog.status()}
+                from session_search.interfaces.capture_status import capture_status
+                output = {"version": 1, "status": "ok", "coverage": catalog.status(),
+                          "local_capture_sync": capture_status(args.data_dir)}
             elif args.command == "capture":
                 output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw,
                                       force=args.force, chunk_raw=args.chunk_raw,
@@ -364,10 +366,17 @@ def remote_command(args, client: Client) -> dict:
         with UploadQueue(args.data_dir) as queue:
             return {"version": 1, "status": "ok", "queue": queue.status()}
     if args.command == "status":
+        from session_search.interfaces.capture_status import capture_status
         result = client.read("status")
+        result["local_capture_sync"] = capture_status(args.data_dir)
         if (args.data_dir / "upload-queue.sqlite3").exists():
-            with UploadQueue(args.data_dir) as queue:
-                result["queue"] = queue.status()
+            db = sqlite3.connect((args.data_dir / "upload-queue.sqlite3").resolve().as_uri() + "?mode=ro",
+                                 uri=True)
+            try:
+                rows = db.execute("SELECT state,COUNT(*) FROM pending GROUP BY state").fetchall()
+                result["queue"] = {"pending": sum(row[1] for row in rows), "states": dict(rows)}
+            finally:
+                db.close()
         return result
     if args.command == "context":
         return bounded_response(client.read("context", {

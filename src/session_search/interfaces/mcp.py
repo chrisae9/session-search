@@ -54,7 +54,9 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
     @server.tool(annotations=annotations, structured_output=False)
     def status() -> str:
         """Report search coverage and availability; replication and backup are separate states."""
+        from session_search.interfaces.capture_status import capture_status
         result = invoke("status", None)
+        result["local_capture_sync"] = capture_status(data_dir)
         queue_path = data_dir / "upload-queue.sqlite3"
         if client and queue_path.exists():
             # Use a read-only connection: even status must not bootstrap a queue.

@@ -28,6 +28,13 @@ enabled, and the configured reserve (64 MiB by default). This is a conservative
 preflight, not a disk reservation: concurrent activity, source growth, and catalog
 writes can still exhaust space. Capture never removes native files to make room.
 
+`status` includes `local_capture_sync`, a read-only summary of this installation's
+last completed scheduled sync: timestamp, capture counts, error count, and backlog
+deferral. `not_observed` means no sync receipt is present; it does not mean the
+catalog is empty. This receipt describes the local computer, not every client or
+the standby's replication and backup coverage. Inspect its timestamp as well as
+its result; an old successful run does not establish current capture freshness.
+
 ## Agent interface
 
 Launch `.venv/bin/session-search --data-dir demo-state/local mcp` as a stdio MCP server. It exposes only `search`, `context`, and `status`; capture and administrative maintenance are separate CLI operations. The MCP adapter returns one bounded text payload per tool call to avoid duplicating evidence in structured and text outputs.

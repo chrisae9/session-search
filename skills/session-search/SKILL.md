@@ -25,7 +25,9 @@ Set `include_current_session` or `include_subagents` when that context is releva
 If a search misses, try a more specific identifier or a different formulation and
 inspect coverage before claiming the history contains no answer. Report provider
 fallback, unavailable servers, and stale coverage when they limit the conclusion.
-A standby response can be older than the primary.
+A standby response can be older than the primary. `status.local_capture_sync`
+describes only this computer’s last scheduled capture; check its timestamp and
+partial or deferred result before claiming recent sessions are searchable.
 
 Routine retrieval does not require capture, reindexing, model downloads, or backup
 administration. If the MCP connection is unavailable, report that limitation and
