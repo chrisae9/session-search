@@ -1,0 +1,10 @@
+[Unit]
+Description=Restore-verify Session Search recovery backups
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/session-search-v1/backup.env
+ExecStart=%h/.local/bin/session-search --data-dir ${SESSION_SEARCH_DATA} backup-cycle --outbox ${SESSION_SEARCH_BACKUP_OUTBOX} --repositories ${SESSION_SEARCH_BACKUP_REPOSITORIES} --reserve-bytes ${SESSION_SEARCH_RESERVE_BYTES}
+UMask=0077
+Nice=10
+TimeoutStartSec=12h

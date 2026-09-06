@@ -430,6 +430,8 @@ class Catalog:
             if errors or len(paths) > 16:
                 result["replication"].update(status="partial", unreadable_receipts=errors,
                                              more_destinations=len(paths) > 16)
+        from session_search.storage.backup_cycle import cycle_status
+        result["backup"] = cycle_status(self.root, result["publication"])
         manifest = self.root / "manifest.json"
         if manifest.exists():
             from session_search.core.records import digest

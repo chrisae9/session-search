@@ -67,6 +67,10 @@ def parser() -> argparse.ArgumentParser:
     backup.add_argument("snapshot", type=Path)
     backup.add_argument("--repositories", type=Path, required=True)
     backup.add_argument("--receipt", type=Path, required=True)
+    cycle = commands.add_parser("backup-cycle", help="retry one recovery snapshot across all backup destinations")
+    cycle.add_argument("--outbox", type=Path, required=True)
+    cycle.add_argument("--repositories", type=Path, required=True)
+    cycle.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
     restore = commands.add_parser("restore-backup", help="retain an exact verified read-only recovery snapshot")
     restore.add_argument("destination", type=Path)
     restore.add_argument("--repositories", type=Path, required=True)
@@ -165,12 +169,16 @@ def main(argv=None) -> int:
         client = Client(args.primary, args.token_file, standby=args.standby) if args.primary else None
         from session_search.core.embeddings import load_provider
         provider = load_provider(args.embedding_config, allow_remote=args.allow_remote_embeddings)
-        if args.command in {"backup", "restore-backup", "plan-offload", "apply-offload"}:
+        if args.command in {"backup", "backup-cycle", "restore-backup", "plan-offload", "apply-offload"}:
             if client:
                 raise ValueError("backup and offload administration runs on the data host")
             from session_search.storage.backups import backup_all, load_repositories, restore_backup
             from session_search.storage.offload import apply_offload, plan_offload
-            if args.command == "backup":
+            if args.command == "backup-cycle":
+                from session_search.storage.backup_cycle import backup_cycle
+                output = backup_cycle(args.data_dir, args.outbox,
+                                      load_repositories(args.repositories), reserve_bytes=args.reserve_bytes)
+            elif args.command == "backup":
                 output = backup_all(args.snapshot, load_repositories(args.repositories), args.receipt)
             elif args.command == "restore-backup":
                 repositories = [r for r in load_repositories(args.repositories) if r.name == args.repository]

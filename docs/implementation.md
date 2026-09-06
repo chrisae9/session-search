@@ -49,7 +49,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Global embedding admission control and bounded archival maintenance retention.
 - [x] Pilot authenticated primary/standby deployment, actual MCP search failover, and credential revocation propagation.
 - [ ] Additional client rollout, full independent backup coverage, and live replacement-primary rehearsal.
-- [ ] Recurring verified backup automation.
+- [x] Retryable backup cycles, per-destination restore receipts, capacity checks, status, and six-hour timer template.
+- [ ] Live recurring backup rollout after full independent destination capacity is available.
 - [x] Pilot historical import with legacy citation resolution checks.
 - [x] Apple Silicon macOS 26 native-inference bundle installation and semantic engine check with OS networking denied.
 - [x] Fresh-process local semantic MCP, concurrent literal query, context, and status with OS networking denied.
