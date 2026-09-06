@@ -34,6 +34,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Persistent read-only recovery from an exact repository receipt, with overwrite and identity checks.
 - [x] Offline core wheel installation and CLI isolation tests without optional packages or network access.
 - [x] Offline MCP dependency-bundle installation and real stdio retrieval with server networking blocked.
+- [x] Python 3.11 qualification on Linux x86_64 and Apple Silicon macOS: full tests, lint, offline core installation, and offline MCP stdio operation.
 - [x] Incremental parser engine with complete-prefix verification, original line boundaries, and ownership-change fallback.
 - [x] Bounded atomic parser checkpoints and opt-in capture/sync integration with full-parse fallback.
 - [x] Mac persistent-cache capture/queue qualification, scheduled pilot reuse, and MCP status verification.
