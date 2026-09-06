@@ -32,3 +32,27 @@ The fusion controls follow the reciprocal-rank formulation described in
 [Elastic's RRF reference](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion).
 That reference explains the rank constant and candidate window; it does not
 establish which values work best for coding-session evidence.
+
+## Literal substring experiment
+
+`benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
+catalog, builds a contentless FTS5 trigram candidate index in that copy, and compares
+four literal queries against the scan plan. The existing substring predicate,
+filters, and evidence ordering remain the final authority. No production catalog
+or search behavior is changed by this benchmark. The experiment copy contains
+private history if the source does; keep it outside the repository.
+
+The pilot index added about 115 MB. Repeated scan queries took roughly 0.9–1.1
+seconds; the trigram candidate plans took about 6–62 ms, with the same ordered
+evidence for the four queries. This small sample is an implementation candidate,
+not whole-corpus parity or a deployed optimization. SQLite documents the
+[trigram tokenizer](https://www.sqlite.org/fts5.html#the_trigram_tokenizer) and its
+short-query limitations.
+
+The reusable benchmark limits candidate terms to eight distinct printable ASCII
+triples and retains the exact substring check. Queries without such a triple would
+need the scan path. Synthetic checks cover mixed Unicode, quotes, wildcard
+characters, embedded NULs, and control characters. Production use still needs
+transactional index construction, maintenance on new evidence, capacity admission,
+and filter/order parity tests. An extra search index also consumes replica and
+backup capacity, which matters on a constrained standby.
