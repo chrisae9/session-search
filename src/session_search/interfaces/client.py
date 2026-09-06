@@ -43,12 +43,15 @@ def validate_endpoint(endpoint: str) -> str:
 
 class Client:
     def __init__(self, primary: str, token_file: Path, *, standby: str | None = None,
-                 timeout: float = 10):
+                 timeout: float = 10, upload_timeout: float = 60):
         self.primary = validate_endpoint(primary)
         self.standby = validate_endpoint(standby) if standby else None
         if not 0 < timeout <= 60:
             raise ValueError("timeout must be greater than zero and at most 60 seconds")
         self.timeout = timeout
+        if not 0 < upload_timeout <= 60:
+            raise ValueError("upload timeout must be greater than zero and at most 60 seconds")
+        self.upload_timeout = upload_timeout
         self.token_file = token_file
         self.opener = urllib.request.build_opener(NoRedirect())
 
@@ -62,7 +65,12 @@ class Client:
                      else "application/json", "Authorization": "Bearer " + token}, method=method,
         )
         try:
-            with self.opener.open(request, timeout=self.timeout) as response:
+            # Finalizing a multi-gigabyte raw file includes checksum verification.
+            # Keep that allowance separate from interactive read failover.
+            upload = route.split("?", 1)[0].split("/")[2] in {
+                "objects", "revision-objects", "revisions",
+            }
+            with self.opener.open(request, timeout=self.upload_timeout if upload else self.timeout) as response:
                 content = response.read(65537)
                 if len(content) > 65536:
                     raise RemoteError(502)

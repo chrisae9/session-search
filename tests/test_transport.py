@@ -131,3 +131,27 @@ def test_client_refuses_unencrypted_nonloopback_and_url_credentials():
         validate_endpoint("http://remote.example")
     with pytest.raises(ValueError):
         validate_endpoint("https://user:password@remote.example")
+
+
+def test_upload_deadline_does_not_delay_search_failover(tmp_path):
+    import io
+    token = tmp_path / 'token'
+    token.write_text('synthetic-token')
+    client = Client('https://primary.example', token, standby='https://standby.example',
+                    timeout=2, upload_timeout=45)
+    observed = []
+
+    class Transport:
+        def open(self, request, *, timeout):
+            observed.append((request.full_url, timeout))
+            if request.full_url == 'https://primary.example/v1/search':
+                raise TimeoutError
+            return io.BytesIO(b'{"version":1}')
+
+    client.opener = Transport()
+    client._request(client.primary, '/v1/objects/hash?offset=0&total=1', b'x', method='PUT')
+    client._request(client.primary, '/v1/revision-objects', {'digest': 'synthetic'})
+    assert client.read('search', {'text': 'example'})['served_by'] == 'standby'
+    assert [timeout for _, timeout in observed] == [45, 45, 2, 2]
+    with pytest.raises(ValueError, match='upload timeout'):
+        Client('https://primary.example', token, upload_timeout=61)
