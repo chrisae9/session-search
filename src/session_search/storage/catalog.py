@@ -339,7 +339,7 @@ class Catalog:
             conditions.append("e.session_id NOT IN (SELECT id FROM excluded)")
         return cte, conditions, args
 
-    def search(self, query: SearchQuery) -> dict:
+    def search(self, query: SearchQuery, *, raw_candidates: bool = False) -> dict:
         cte, conditions, args = self.scope(query)
         if query.literal:
             conditions.append("instr(lower(e.text),lower(?))>0")
@@ -379,19 +379,25 @@ class Catalog:
                 "JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision "
                 "ORDER BY c.rank,e.timestamp DESC,e.session_id,e.ordinal"
             )
+        candidate_limit = query.limit if query.literal or raw_candidates else max(query.limit, 50)
         rows = self.db.execute(
             cte + statement,
-            (*args, query.limit + 1),
+            (*args, candidate_limit + 1),
         ).fetchall()
         results = []
-        for row in rows[:query.limit]:
+        from session_search.storage.ranking import evidence_weight, rank_results
+        for row in rows[:candidate_limit]:
             results.append({
                 "citation": Citation(row["session_id"], row["revision"], row["event_id"],
                                      match_offset(row["text"], query.text)).to_dict(),
                 "role": row["role"], "timestamp": row["timestamp"], "origin": row["origin"],
                 "excerpt": excerpt(row["text"], query.text), "project": row["project"],
                 "title": row["title"], "score": -row["rank"],
+                **({"_evidence_weight": evidence_weight(row["text"], row["role"], query)}
+                   if not query.literal else {}),
             })
+        if not query.literal and not raw_candidates:
+            results = rank_results(query, results)[:query.limit]
         return {"version": 1, "status": "ok" if results else "no_matches",
                 "mode": "keyword", "semantic_available": False, "results": results,
                 "more_matches": len(rows) > query.limit, "coverage": self.status()}

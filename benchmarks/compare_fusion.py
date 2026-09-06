@@ -51,7 +51,8 @@ def compare(catalog, cases, provider):
     results = {name: [] for name in (*policies, 'keyword', 'vector')}
     for case in cases:
         lexical = [r['citation']['session_id'] for r in catalog.search(
-            SearchQuery(case['query'], role='assistant', limit=50))['results']]
+            SearchQuery(case['query'], role='assistant', limit=50),
+            raw_candidates=True)['results']]
         vector = np.asarray(validate_vector(provider.embed(case['query'], query=True),
                                             provider.identity.dimensions), dtype='<f4')
         scores = {}

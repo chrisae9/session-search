@@ -21,8 +21,9 @@ vectors, and opens the database read-only. Set `--allow-remote-embeddings` only 
 an explicitly configured remote provider and choose a new `--output` report path.
 
 The comparison reuses each query vector across rank constants, semantic weights,
-and lexical candidate windows. Its `equal_60` baseline should agree with production
-hybrid on this one-event-per-session corpus. Analyze identifier cases separately
+and lexical candidate windows. `equal_60` represents the previous fusion policy;
+`equal_1` matches the current fusion constant. Neither diagnostic applies evidence
+weights or conversation diversification. Analyze identifier cases separately
 from conceptual questions; a better aggregate score can hide identifier regressions.
 Keep parameters fixed before examining newly added cases, and expand relevance
 judgments before choosing a runtime default. These diagnostic policies are not
@@ -32,6 +33,30 @@ The fusion controls follow the reciprocal-rank formulation described in
 [Elastic's RRF reference](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion).
 That reference explains the rank constant and candidate window; it does not
 establish which values work best for coding-session evidence.
+
+## Evidence selection
+
+Ordinary searches rank bounded lexical and semantic candidate pools with equal
+reciprocal-rank contributions, using a constant of 1. Strong matches near the top
+of either pool retain more influence than with the previous constant of 60.
+Message evidence receives more weight than tool transcripts. Additional heuristics
+downrank generated envelopes, repeated search invocations, planning preambles,
+and evaluation prose when those are not the requested subject. These are ranking
+hints, not relevance judgments or exclusions; they can also downrank useful text.
+
+Broad searches show distinct conversations before additional hits from the same
+conversation. A session-scoped search retains passage ordering so an agent can
+find the answer within a promising conversation. An exact session ID receives
+priority when that session is in the retrieved pool. Literal search bypasses
+these heuristics. Role, project, time and source filters still constrain candidates;
+immutable citations and context expansion are unchanged.
+
+Evaluate both conversation discovery and the actual answer passage. Finding the
+expected conversation does not establish that the first excerpt answers the
+question. Keep repeated benchmark queries out of the judgment evidence, record
+paraphrase regressions, and use unseen topics before claiming general accuracy.
+The committed regression tests cover transcript noise, conversation diversity,
+explicit evidence requests, filtered fallback and citation integrity.
 
 ## Literal substring experiment
 

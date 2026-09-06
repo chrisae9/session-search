@@ -12,6 +12,7 @@ from session_search.core.embeddings import validate_vector
 from session_search.core.records import Citation, digest
 from session_search.storage.catalog import Catalog, excerpt, match_offset
 from session_search.storage import metadata_index
+from session_search.storage.ranking import evidence_weight, rank_results
 
 SEMANTIC_SCHEMA = """
 CREATE TABLE IF NOT EXISTS semantic_chunks (
@@ -133,7 +134,7 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
     # and their evidence while background publication advances the current head.
     catalog.db.execute("BEGIN")
     try:
-        lexical = catalog.search(replace(query, limit=max(query.limit, 50)))
+        lexical = catalog.search(replace(query, limit=max(query.limit, 50)), raw_candidates=True)
         try:
             import numpy as np
             vector = np.asarray(validate_vector(provider.embed(query.text, query=True),
@@ -192,16 +193,10 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                     "excerpt": excerpt(chunk, query.text), "role": row["role"],
                     "timestamp": row["timestamp"], "origin": row["origin"],
                     "project": row["project"], "title": row["title"], "score": score,
+                    "_evidence_weight": evidence_weight(row["text"], row["role"], query),
                 })
-            merged, scores = {}, {}
-            for candidates in (lexical["results"], semantic):
-                for rank, result in enumerate(candidates, start=1):
-                    cite = result["citation"]
-                    key = (cite["session_id"], cite["revision"], cite["event_id"])
-                    merged[key] = result
-                    scores[key] = scores.get(key, 0) + 1 / (60 + rank)
-            ordered = sorted(scores, key=lambda key: (-scores[key], key))
-            lexical["results"] = [{**merged[key], "score": scores[key]} for key in ordered[:query.limit]]
+            ordered = rank_results(query, lexical["results"], semantic)
+            lexical["results"] = ordered[:query.limit]
             lexical["status"] = "ok" if ordered else "no_matches"
             lexical["mode"] = "hybrid"
             lexical["semantic_available"] = True
@@ -220,7 +215,7 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             ).fetchone()[0]
         except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
             lexical.update(mode="keyword", degraded=True, degradation=type(exc).__name__)
-            lexical["results"] = lexical["results"][:query.limit]
+            lexical["results"] = rank_results(query, lexical["results"])[:query.limit]
         return lexical
     finally:
         catalog.db.rollback()
