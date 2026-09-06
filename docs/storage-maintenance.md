@@ -26,7 +26,7 @@ and growing history can legitimately require more space.
 
 | State | Current behavior |
 | --- | --- |
-| Server upload capacity | Manual partial expiry is available below; no automatic expiry timer or server-wide staging quota is implemented. |
+| Server upload capacity | Manual partial expiry is available below; optional shared staging admission is available below. No automatic expiry timer is implemented. |
 | Server transfer lock files | Persist after transfers. Do not unlink them while readers or writers can hold open descriptors: a new file at the same path would create a different lock and break mutual exclusion. |
 | Server or local archive chunk temporaries | Ordinary exception cleanup removes them, but a killed process can leave `.chunk-*` files. The client-only cleanup above must not be applied to a canonical catalog. No server sweep is implemented. |
 | Interrupted backup snapshot construction | `.snapshot-*` staging defers the next cycle for operator inspection. It is not automatically deleted or treated as a completed backup. |
@@ -48,6 +48,40 @@ no raw acknowledgement precedes completion, and expand the eventual citation.
 Normalized-upload tests also expire an interrupted partial, reconstruct the
 payload from the durable queue, and verify idempotent ingestion after a lost
 acknowledgement. These tests use synthetic data.
+
+## Upload staging budget
+
+Start the primary with an explicit byte budget when upload staging needs a cap:
+
+```sh
+session-search --data-dir PRIMARY_DATA serve --credentials CREDENTIALS_FILE --max-staging-bytes 68719476736
+```
+
+The example permits 64 GiB of combined raw and normalized partials. Choose room
+for the largest expected upload and concurrent clients. All server processes
+writing the same data root must use the same setting. This is opt-in; the default
+keeps the existing free-space check without adding a directory scan per chunk.
+
+Admission holds a stable process-shared lock across a bounded directory scan and
+durable append. It counts logical bytes in every regular `.part` file in both
+transfer directories, conservatively including hardlinks and unrecognized names.
+The scan includes lock files toward `--staging-scan-limit` (default 10,000,
+maximum 1,000,000). A busy lock, exceeded byte/entry limit, or unsupported partial
+file type returns retryable HTTP 503. Existing partials and client queues remain
+intact. Completed uploads release their staging; an already complete partial can
+finalize without allocating more upload bytes even after the budget is lowered.
+
+If partial uploads fill the budget, they can stall one another before completion.
+Review and raise the budget or use the explicit expiry workflow below; the server
+does not discard pending bytes to make room. Retained lock files may eventually
+require a larger scan limit. The scan runs per appended chunk, so raising its
+limit can increase upload latency. No hard scan deadline is promised.
+
+This cap covers upload partials only. Canonical history, archive chunk conversion,
+lock-file disk allocation, local capture, backups, and unrelated processes still
+need filesystem capacity. It is not a reservation of free space. Keep the capacity
+lock inode intact, and do not mix configured writers with older or unconfigured
+upload writers on the same primary.
 
 ## Manual transfer expiry
 

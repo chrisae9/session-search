@@ -18,9 +18,13 @@ class OffsetConflict(ValueError):
 
 class RawTransfers:
     def __init__(self, root: Path, *, namespace: str = "raw", max_size: int = 32 * 1024 ** 3,
-                 chunked: bool = False):
+                 chunked: bool = False, max_staging_bytes: int | None = None, staging_scan_limit: int = 10000):
         if chunked and namespace != "raw":
             raise ValueError("only raw archival supports shared chunks")
+        from session_search.storage.transfer_capacity import validate_budget
+        validate_budget(max_staging_bytes, staging_scan_limit)
+        self.max_staging_bytes = max_staging_bytes
+        self.staging_scan_limit = staging_scan_limit
         self.chunked = chunked
         self.root = root
         self.objects = ObjectStore(root, namespace=namespace)
@@ -114,13 +118,16 @@ class RawTransfers:
             observed = partial.stat().st_size if partial.exists() else 0
             if offset != observed:
                 raise OffsetConflict("transfer offset conflict; query durable progress before retrying")
-            if shutil.disk_usage(self.root).free < len(chunk) + 64 * 1024 * 1024:
-                raise OSError("insufficient space; pending upload retained")
-            with os.fdopen(os.open(partial, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "ab") as output:
-                output.write(chunk)
-                output.flush()
-                os.fsync(output.fileno())
-            sync_directory(self.staging)
+            from session_search.storage.transfer_capacity import staging_admission
+            with staging_admission(self.root, len(chunk), self.max_staging_bytes,
+                                   self.staging_scan_limit):
+                if shutil.disk_usage(self.root).free < len(chunk) + 64 * 1024 * 1024:
+                    raise OSError("insufficient space; pending upload retained")
+                with os.fdopen(os.open(partial, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), "ab") as output:
+                    output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                sync_directory(self.staging)
             current = observed + len(chunk)
             if current != total:
                 return {"version": 1, "status": "pending", "offset": current}

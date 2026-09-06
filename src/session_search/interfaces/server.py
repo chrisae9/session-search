@@ -50,9 +50,12 @@ class SearchPool:
 
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                provider=None, chunk_raw: bool = False,
-               search_workers: int = 4,
+               search_workers: int = 4, max_staging_bytes: int | None = None,
+               staging_scan_limit: int = 10000,
                offload_repositories: Path | None = None,
                offload_receipt: Path | None = None) -> FastAPI:
+    from session_search.storage.transfer_capacity import validate_budget
+    validate_budget(max_staging_bytes, staging_scan_limit)
     if bool(offload_repositories) != bool(offload_receipt):
         raise ValueError('offload verification requires repositories and a recovery receipt')
     if readonly and offload_repositories:
@@ -267,7 +270,8 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         if readonly:
             raise HTTPException(409, "raw transfer is available only on the primary")
         from session_search.storage.transfers import RawTransfers
-        return RawTransfers(data_dir, chunked=chunk_raw).status(request.state.producer, key)
+        return RawTransfers(data_dir, chunked=chunk_raw, max_staging_bytes=max_staging_bytes,
+                            staging_scan_limit=staging_scan_limit).status(request.state.producer, key)
 
     @app.put("/v1/objects/{key}")
     async def raw_chunk(key: str, offset: int, total: int, request: Request):
@@ -277,7 +281,8 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         from session_search.storage.transfers import OffsetConflict, RawTransfers
         chunk = await request.body()
         try:
-            return await run_in_threadpool(RawTransfers(data_dir, chunked=chunk_raw).append,
+            return await run_in_threadpool(RawTransfers(data_dir, chunked=chunk_raw, max_staging_bytes=max_staging_bytes,
+                            staging_scan_limit=staging_scan_limit).append,
                 request.state.producer, key, offset, total, chunk)
         except OffsetConflict:
             raise HTTPException(503, "transfer progress changed; retry from durable offset") from None
@@ -286,7 +291,8 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
 
     def revision_transfers():
         from session_search.storage.transfers import RawTransfers
-        return RawTransfers(data_dir, namespace="revision-upload", max_size=MAX_REVISION_UPLOAD)
+        return RawTransfers(data_dir, namespace="revision-upload", max_size=MAX_REVISION_UPLOAD,
+                            max_staging_bytes=max_staging_bytes, staging_scan_limit=staging_scan_limit)
 
     @app.get("/v1/revision-objects/{key}")
     def revision_status(key: str, request: Request):
