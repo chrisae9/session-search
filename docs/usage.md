@@ -135,6 +135,15 @@ must already be installed. This qualifies local keyword MCP operation; local
 inference still requires separately provisioned model artifacts and native runtime
 qualification. CI repeats core and MCP checks on its supported platform matrix.
 
+Native qualification covers Apple Silicon macOS 26 and a Linux x86_64 CPU pilot.
+The CPU pilot used Python 3.11 with a two-core quota: a cold MCP query exceeded
+the existing model deadline and returned explicit keyword fallback; subsequent
+semantic retrieval, context, and status passed with networking denied. This is
+fallback/recovery evidence, not a guarantee of semantic results on the first cold
+query. The Linux wheel was built on its test host and has not been qualified as a
+portable manylinux distribution. Keep source hashes, build settings, compiler
+records, and dependency notices with locally built native wheels.
+
 ## Recovery development
 
 `snapshot DESTINATION` uses SQLite's backup API and includes referenced raw objects. `verify-snapshot SNAPSHOT` verifies the database checksum, database references, and every raw object. `activate-replica SNAPSHOT` stages and verifies a copy before switching the replica's current generation.
