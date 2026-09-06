@@ -35,6 +35,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="inspect catalog coverage")
     literal_index = commands.add_parser("build-literal-index", help="build optional substring candidates locally")
     literal_index.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
+    metadata_index = commands.add_parser("build-metadata-index", help="build optional keyword ranking metadata locally")
+    metadata_index.add_argument("--reserve-bytes", type=int, default=2 * 1024 ** 3)
     commands.add_parser("compact-client", help="reclaim acknowledged upload payload pages when idle")
     commands.add_parser("fence-primary", help="prevent further cooperating local catalog and transfer writes")
     prepare = commands.add_parser("prepare-primary", help="prepare a new primary from exact recovery evidence")
@@ -324,6 +326,16 @@ def main(argv=None) -> int:
             if client:
                 raise ValueError("literal index construction runs on the data host")
             from session_search.storage.literal import build
+            with Catalog(args.data_dir.resolve()) as catalog:
+                output = build(catalog, reserve_bytes=args.reserve_bytes)
+            print(canonical_json(output))
+            return 0
+        if args.command == "build-metadata-index":
+            if client:
+                raise ValueError("metadata index construction runs on the data host")
+            if not (args.data_dir / 'catalog.sqlite3').is_file():
+                raise ValueError("metadata index construction requires an initialized catalog")
+            from session_search.storage.metadata_index import build
             with Catalog(args.data_dir.resolve()) as catalog:
                 output = build(catalog, reserve_bytes=args.reserve_bytes)
             print(canonical_json(output))

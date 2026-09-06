@@ -357,12 +357,30 @@ class Catalog:
             args.append(fts_expression(query.text))
             ranking = "bm25(evidence_fts)"
             join_fts = "JOIN evidence_fts ON evidence_fts.rowid=e.row_id"
-        rows = self.db.execute(
-            cte + f"SELECT e.*,r.project,r.title,{ranking} AS rank FROM events e "
+        from session_search.storage import metadata_index
+        use_metadata = not query.literal and metadata_index.ready(self.db)
+        projection = ("e.row_id AS candidate_row,e.session_id AS candidate_session,"
+                      "e.ordinal AS candidate_ordinal" if use_metadata else "e.*,r.project,r.title")
+        source = metadata_index.event_source() if use_metadata else "events e"
+        statement = (
+            f"SELECT {projection},{ranking} AS rank FROM {source} "
             "JOIN heads h ON h.session_id=e.session_id AND h.revision=e.revision "
             "JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision "
             + join_fts + " WHERE " + " AND ".join(conditions)
-            + " ORDER BY rank,e.timestamp DESC,e.session_id,e.ordinal LIMIT ?",
+            + " ORDER BY rank,e.timestamp DESC,e.session_id,e.ordinal LIMIT ?"
+        )
+        if use_metadata:
+            # LIMIT stays inside the joined subquery: materialize full text only
+            # for the final candidates, preserving every filter and tie breaker.
+            statement = (
+                "SELECT e.*,r.project,r.title,c.rank FROM (" + statement + ") c "
+                "JOIN events e ON e.row_id=c.candidate_row "
+                "AND e.session_id=c.candidate_session AND e.ordinal=c.candidate_ordinal "
+                "JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision "
+                "ORDER BY c.rank,e.timestamp DESC,e.session_id,e.ordinal"
+            )
+        rows = self.db.execute(
+            cte + statement,
             (*args, query.limit + 1),
         ).fetchall()
         results = []

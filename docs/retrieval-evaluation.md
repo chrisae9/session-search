@@ -69,6 +69,20 @@ or latency on another machine. Standby rollout and additional-machine qualificat
 remain open. An extra search index also consumes replica and
 backup capacity, which matters on a constrained standby.
 
+## Keyword ranking metadata
+
+An isolated frozen-catalog comparison tested three keyword queries, including a
+user-role filter, in mirrored execution order. A covering metadata index and
+deferred text projection preserved complete responses: ordered citations, scores,
+excerpts, filters, and coverage. Per-file cache-eviction hints were applied between
+runs, and process-level physical reads were recorded.
+
+The original path took 3.5–9.0 seconds and read about 0.34–1.13 GB per query.
+The indexed path took 0.28–1.63 seconds and read about 0.07–0.11 GB. The index added
+64 MB and took about 9.6 seconds to build on that host. These are keyword-only
+measurements on three queries, not full hybrid latency or whole-corpus relevance
+qualification. Cache hints are advisory, and other host work continued.
+
 ## Concurrent embedding requests
 
 A two-minute pilot check kept one synthetic background worker continuously
