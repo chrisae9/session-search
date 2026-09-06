@@ -35,6 +35,12 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("status", help="inspect catalog coverage")
     commands.add_parser("compact-client", help="reclaim acknowledged upload payload pages when idle")
     commands.add_parser("fence-primary", help="prevent further cooperating local catalog and transfer writes")
+    prepare = commands.add_parser("prepare-primary", help="prepare a new primary from exact recovery evidence")
+    prepare.add_argument("snapshot", type=Path)
+    prepare.add_argument("destination", type=Path)
+    prepare.add_argument("--snapshot-id", required=True)
+    prepare.add_argument("--old-primary-isolated", action="store_true", required=True,
+                         help="assert the old host cannot accept client writes")
     snapshot = commands.add_parser("snapshot", help="create a consistent verified backup input")
     snapshot.add_argument("destination", type=Path)
     snapshot.add_argument("--search-only", action="store_true",
@@ -172,6 +178,15 @@ def main(argv=None) -> int:
             output = (receive_replica(args.snapshot, args.data_dir) if args.command == "receive-replica"
                       else replicate(args.data_dir, args.outbox, args.host,
                                      args.remote_data, args.remote_executable))
+            print(canonical_json(output))
+            return 0
+        if args.command == "prepare-primary":
+            from session_search.storage.recovery import prepare_primary
+            if client:
+                raise ValueError("primary preparation runs locally on the replacement host")
+            output = prepare_primary(args.snapshot, args.destination,
+                                     expected_snapshot=args.snapshot_id,
+                                     old_primary_isolated=args.old_primary_isolated)
             print(canonical_json(output))
             return 0
         if args.command in {"snapshot", "verify-snapshot", "activate-replica", "prune-replica"}:

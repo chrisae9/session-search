@@ -50,5 +50,38 @@ has not changed. There is no automatic unfence command.
 This is a cooperative local fence, not distributed promotion. Older binaries and
 external database writers do not honor its lock. Stop those processes and isolate
 the old host from client traffic before starting a replacement primary. Do not
-remove the fence marker to reuse an old primary. Preparing and activating a writable
-replacement from verified recovery media remains a separate recovery step.
+remove the fence marker to reuse an old primary.
+
+## Prepare and switch to a replacement primary
+
+Restore an exact recovery snapshot with `restore-backup` (see [backup and restore usage](usage.md)),
+then verify it and retain its snapshot digest. A search-only replica cannot serve
+as recovery input. With the old primary isolated, run:
+
+```sh
+session-search prepare-primary ./recovered-snapshot ./replacement-store \
+  --snapshot-id SNAPSHOT_DIGEST --old-primary-isolated
+session-search --data-dir ./replacement-store status
+```
+
+The isolation flag is an operator assertion, not a network or host check. The
+command refuses existing destinations and mismatched digests, verifies copied
+catalog and raw evidence, and publishes the new directory only after preparation
+succeeds. Allow space for a full copy. The source remains a read-only recovery
+snapshot. `recovery.json` records the source snapshot and both publication
+identities; `recovery-source.json` retains its original manifest for audit.
+
+The replacement preserves revisions, citations, raw evidence, and upload receipts,
+but starts a new publication identity. Existing replicas deliberately reject that
+identity. Prepare a new replica directory from the replacement, verify its contents,
+and point the standby service at it before restoring client failover. Do not delete
+the old replica until its replacement has been verified.
+
+Restore credentials separately from their authoritative registry backup or issue
+fresh device credentials; snapshot preparation does not copy authentication or
+service configuration. Start the primary service with the replacement directory,
+verify authenticated search/context and a synthetic upload, then switch clients
+to its endpoint. Reconcile surviving client queues using the checkpoint recovery
+procedure above. Keep the old host isolated throughout. A later primary failure
+requires another explicit recovery; this procedure does not automatically promote
+a standby or eliminate the backup recovery-point gap.

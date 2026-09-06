@@ -78,6 +78,20 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
             Catalog(destination)
         with pytest.raises(FileExistsError):
             restore_backup(repository, receipt, destination)
+        # Both independent Restic restores must support continued writing while
+        # preserving the exact citation and raw evidence from recovery.
+        from session_search.storage.recovery import prepare_primary
+        from session_search.core.records import Event, SessionRevision
+        replacement = tmp_path / (repository.name + "-primary")
+        prepared = prepare_primary(destination, replacement, expected_snapshot=receipt["snapshot"],
+                                   old_primary_isolated=True)
+        assert prepared["status"] == "prepared"
+        with Catalog(replacement) as primary:
+            assert primary.context([hit["citation"]])["results"]
+            assert ObjectStore(replacement).path(key).read_text() == rollout("recoverable evidence")
+            primary.ingest(SessionRevision("new-session", (Event("new", "user", "continued work"),)),
+                           producer="new-device", request_id="new")
+            assert primary.status()["sessions"] == 2
         wrong_repository = {**receipt, "repository_id": "0" * 64}
         with pytest.raises(ValueError, match="identity changed"):
             restore_backup(repository, wrong_repository, tmp_path / "wrong-repository")
