@@ -23,6 +23,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--primary", help="explicit remote mode: primary HTTPS endpoint")
     result.add_argument("--standby", help="optional read-only search endpoint")
     result.add_argument("--token-file", type=Path, help="device credential file for remote mode")
+    result.add_argument("--read-timeout", type=float, default=10,
+                        help="remote read timeout in seconds (greater than 0, at most 60; default 10)")
     result.add_argument("--embedding-config", type=Path, help="explicit model configuration file")
     result.add_argument("--allow-remote-embeddings", action="store_true",
                         help="explicitly permit the configured remote model endpoint")
@@ -186,7 +188,8 @@ def main(argv=None) -> int:
             raise ValueError("remote settings require an explicit primary endpoint")
         if args.primary and not args.token_file:
             raise ValueError("remote mode requires a token file")
-        client = Client(args.primary, args.token_file, standby=args.standby) if args.primary else None
+        client = Client(args.primary, args.token_file, standby=args.standby,
+                        timeout=args.read_timeout) if args.primary else None
         if args.command in {'plan-client-offload', 'apply-client-offload', 'recover-client-acknowledgements'}:
             if client is None or not (args.data_dir / 'upload-queue.sqlite3').is_file():
                 raise ValueError('client offload requires a primary and an existing upload queue')

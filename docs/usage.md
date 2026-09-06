@@ -97,6 +97,14 @@ In another shell:
 
 `--standby` adds a read-only alternate for search, context, and status. Uploads never fail over. Conflicting revisions stay queued for reconciliation; repeated connection failures back off without deleting pending payloads. A flush sends at most one pending revision per session per pass, preserving order.
 
+`--read-timeout SECONDS` sets the remote socket timeout for search, context, and
+status, including those invoked through `mcp`. Put it before the subcommand.
+The default is 10 seconds; values must be greater than zero and at most 60.
+For example, `--read-timeout 30` allows a measured larger-catalog search to finish
+without changing its retrieval mode. Each endpoint gets this allowance, so a
+longer timeout can also delay failover. It is not a total operation deadline and
+does not change upload timeouts, embedding-provider timeouts, or local searches.
+
 Normalized payloads over 8 MiB automatically use resumable 1 MiB chunks in a separate temporary namespace. A checksum-verified payload then goes through the same revision conflict and idempotency checks as an ordinary upload. Successful ingestion removes this transfer copy; it does not archive raw files. The current normalized payload ceiling is 256 MiB. Larger payloads remain in the client queue as rejected work, requiring a supported format or size change before retry. Large JSON parsing is serialized across server worker processes to bound memory use; busy clients retain their payloads and retry.
 
 ## Embeddings
