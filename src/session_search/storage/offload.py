@@ -64,18 +64,50 @@ def plan_offload(catalog: Catalog, receipt_file: Path, *, now: float | None = No
     return result
 
 
-def apply_offload(plan: dict, repositories: list[ResticRepository], *, catalog: Catalog,
-                  expected_plan_id: str) -> dict:
-    original = dict(plan)
-    plan_id = original.pop("plan_id", None)
-    if plan_id != expected_plan_id or digest(canonical_json(original).encode()) != plan_id:
-        raise ValueError("offload plan changed after review")
-    if writers_running():
-        raise RuntimeError("stop Codex writers before applying an offload plan")
-    if catalog.readonly:
-        raise ValueError("offload requires the primary catalog")
+def verify_offload_backups(receipt: dict, candidates: list[dict],
+                           repositories: list[ResticRepository]) -> dict:
+    """Freshly restore all required backups; never read or remove native files.
+
+    The returned report is verification evidence, not an offline deletion permit.
+    Remote callers must bind it to an authenticated request and recheck local files.
+    """
+    import re
+    if (not isinstance(receipt, dict) or receipt.get("version") != 1
+            or receipt.get("status") != "restore_verified"):
+        raise ValueError("verified version 1 backup receipts are required")
+    receipts = receipt.get("receipts", [])
+    if not isinstance(receipts, list) or not all(isinstance(row, dict) for row in receipts):
+        raise ValueError("backup receipts must be a list of records")
+    if not isinstance(candidates, list) or not all(isinstance(row, dict) for row in candidates):
+        raise ValueError("raw requirements must be a list of records")
+    names = [repository.name for repository in repositories]
+    if len(names) < 2 or len(set(names)) != len(names):
+        raise ValueError("two distinct configured backup repositories are required")
+    if (len(receipts) != len(names)
+            or {row.get("repository") for row in receipts} != set(names)):
+        raise ValueError("receipts must cover every configured backup repository")
+    for row in receipts:
+        if row.get("version") != 1 or row.get("status") != "restore_verified":
+            raise ValueError("verified version 1 backup receipts are required")
+        for field in ("repository_id", "backup_id", "snapshot"):
+            if not isinstance(row.get(field), str) or not re.fullmatch("[0-9a-f]{64}", row[field]):
+                raise ValueError("invalid backup receipt identity")
+        source = Path(row.get("source_path", ""))
+        if not source.is_absolute() or ".." in source.parts or source == Path("/"):
+            raise ValueError("invalid backup source path")
+    if len({row["snapshot"] for row in receipts}) != 1:
+        raise ValueError("backup receipts do not cover the same snapshot")
+    requirements = []
+    for candidate in candidates:
+        if not isinstance(candidate.get("session_id"), str) or not candidate["session_id"]:
+            raise ValueError("invalid required session identity")
+        for field in ("revision", "digest"):
+            if not isinstance(candidate.get(field), str) or not re.fullmatch("[0-9a-f]{64}", candidate[field]):
+                raise ValueError("invalid required raw identity")
+        if type(candidate.get("size")) is not int or candidate["size"] <= 0:
+            raise ValueError("invalid required raw size")
+        requirements.append({key: candidate[key] for key in ("session_id", "revision", "digest", "size")})
     configured = {repository.name: repository for repository in repositories}
-    receipts = plan["receipt"]["receipts"]
     if len(receipts) < 2 or len({row["repository_id"] for row in receipts}) != len(receipts):
         raise ValueError("two distinct backup repositories are required")
     # Restore each required destination now. Inspect its restored catalog to prove
@@ -91,16 +123,35 @@ def apply_offload(plan: dict, repositories: list[ResticRepository], *, catalog: 
             repository.run(["restore", receipt["backup_id"], "--target", root])
             restored = Path(root) / receipt["source_path"].lstrip("/")
             from session_search.storage.snapshots import verify_snapshot
-            if verify_snapshot(restored)["snapshot"] != receipt["snapshot"]:
+            verified = verify_snapshot(restored)
+            if verified["purpose"] != "recovery" or verified["snapshot"] != receipt["snapshot"]:
                 raise ValueError("restored snapshot does not match receipt")
             with Catalog(restored, readonly=True) as recovered:
-                for candidate in plan["candidates"]:
+                for candidate in candidates:
                     row = recovered.db.execute(
-                        "SELECT 1 FROM raw_sources WHERE session_id=? AND revision=? AND digest=?",
-                        (candidate["session_id"], candidate["revision"], candidate["digest"]),
+                        "SELECT 1 FROM raw_sources WHERE session_id=? AND revision=? AND digest=? AND size=?",
+                        (candidate["session_id"], candidate["revision"], candidate["digest"], candidate["size"]),
                     ).fetchone()
                     if not row:
                         raise ValueError("required raw revision is absent from a backup")
+    return {"version": 1, "status": "restore_verified", "verified_at": time.time(),
+            "requirements_digest": digest(canonical_json(requirements).encode()),
+            "snapshot": receipts[0]["snapshot"], "candidates_verified": len(requirements),
+            "repositories": [{key: row[key] for key in ("repository", "repository_id", "backup_id")}
+                             for row in receipts]}
+
+
+def apply_offload(plan: dict, repositories: list[ResticRepository], *, catalog: Catalog,
+                  expected_plan_id: str) -> dict:
+    original = dict(plan)
+    plan_id = original.pop("plan_id", None)
+    if plan_id != expected_plan_id or digest(canonical_json(original).encode()) != plan_id:
+        raise ValueError("offload plan changed after review")
+    if writers_running():
+        raise RuntimeError("stop Codex writers before applying an offload plan")
+    if catalog.readonly:
+        raise ValueError("offload requires the primary catalog")
+    verify_offload_backups(plan["receipt"], plan["candidates"], repositories)
     removed, skipped = 0, 0
     for candidate in plan["candidates"]:
         if writers_running():

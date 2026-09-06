@@ -36,6 +36,19 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
         assert len(result["receipts"]) == 2
         plan = offload.plan_offload(catalog, receipt_path)
         assert len(plan["candidates"]) == 1
+        # The server-side primitive verifies exact raw requirements without
+        # needing access to a client's native paths or permission to remove them.
+        requirements = [{key: row[key] for key in ("session_id", "revision", "digest", "size")}
+                        for row in plan["candidates"]]
+        proof = offload.verify_offload_backups(result, requirements, repositories)
+        assert proof["candidates_verified"] == 1
+        assert proof["status"] == "restore_verified"
+        assert "source_path" not in json.dumps(proof)
+        assert source.exists()
+        wrong_size = [{**requirements[0], "size": requirements[0]["size"] + 1}]
+        with pytest.raises(ValueError, match="absent from a backup"):
+            offload.verify_offload_backups(result, wrong_size, repositories)
+        assert source.exists()
         monkeypatch.setattr(offload, "writers_running", lambda: True)
         with pytest.raises(RuntimeError, match="writers"):
             offload.apply_offload(plan, repositories, catalog=catalog, expected_plan_id=plan["plan_id"])
@@ -122,3 +135,27 @@ def test_two_real_backups_restore_exact_evidence_before_manual_offload(tmp_path,
             restore_backup(repository, wrong_snapshot, tmp_path / "wrong-snapshot")
         assert not (tmp_path / "wrong-snapshot").exists()
         assert not list(tmp_path.glob(".restore-*"))
+
+
+def test_offload_verification_rejects_incomplete_policy_and_invalid_receipts(tmp_path, monkeypatch):
+    repositories = [ResticRepository(name, str(tmp_path / name), tmp_path / 'password')
+                    for name in ('one', 'two', 'three')]
+    def forbidden(*args, **kwargs):
+        raise AssertionError('invalid request reached Restic')
+    monkeypatch.setattr(ResticRepository, 'run', forbidden)
+    rows = [{'version': 1, 'status': 'restore_verified', 'repository': r.name,
+             'repository_id': str(i) * 64, 'backup_id': 'a' * 64,
+             'snapshot': 'b' * 64, 'source_path': '/snapshot'}
+            for i, r in enumerate(repositories)]
+    receipt = {'version': 1, 'status': 'restore_verified', 'receipts': rows}
+    with pytest.raises(ValueError, match='every configured'):
+        offload.verify_offload_backups({**receipt, 'receipts': rows[:2]}, [], repositories)
+    with pytest.raises(ValueError, match='same snapshot'):
+        offload.verify_offload_backups({**receipt, 'receipts': [*rows[:2],
+            {**rows[2], 'snapshot': 'c' * 64}]}, [], repositories)
+    with pytest.raises(ValueError, match='source path'):
+        offload.verify_offload_backups({**receipt, 'receipts': [*rows[:2],
+            {**rows[2], 'source_path': '/snapshot/../../outside'}]}, [], repositories)
+    with pytest.raises(ValueError, match='distinct backup'):
+        offload.verify_offload_backups({**receipt, 'receipts': [*rows[:2],
+            {**rows[2], 'repository_id': rows[0]['repository_id']}]}, [], repositories)
