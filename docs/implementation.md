@@ -19,6 +19,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Idle client queue compaction that preserves acknowledgements and capture checkpoints.
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
 - [x] Process-shared background embedding admission and bounded retries during provider outages.
+- [x] Two-minute pilot embedding contention check: 120 foreground queries and 809 background requests completed without failures.
 - [x] New embedding work selects chunks referenced by current session revisions, retaining older evidence and citations.
 - [x] Three read-only MCP tools and authenticated HTTP transport.
 - [x] Monotonic SSH credential propagation, exact acknowledgements, and independent retry timer templates.

@@ -68,3 +68,17 @@ semantic relevance, exhaustive corpus parity, sustained concurrency performance,
 or latency on another machine. Standby rollout and additional-machine qualification
 remain open. An extra search index also consumes replica and
 backup capacity, which matters on a constrained standby.
+
+## Concurrent embedding requests
+
+A two-minute pilot check kept one synthetic background worker continuously
+embedding 6,000-character inputs while issuing one foreground query per second.
+All 120 foreground queries and 809 background requests succeeded. Foreground
+median latency was 86 ms, p95 was 139 ms, and maximum was 149 ms, below the
+configured two-second query timeout. The five-query baseline median was 11 ms.
+Normal background services were not paused.
+
+This measures the embedding endpoint under that workload, not complete hybrid
+search latency or fairness against arbitrary applications. Session Search's
+background indexers share a catalog lock; it is not a deployment-wide scheduler
+for unrelated producers or independent catalogs.
