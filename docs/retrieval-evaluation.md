@@ -163,6 +163,47 @@ fallback. Historical recursive exclusion sets were not separately snapshotted,
 so their exact earlier membership cannot be independently reconstructed from
 later catalog state. Private evidence and full judgments remain outside the repo.
 
+## Passage lexical retrieval experiment
+
+A separate, unshipped prototype ranked each event by its strongest lexical
+passage, using the existing semantic geometry of 6,000 characters with a
+5,700-character stride. Filters applied before selecting distinct events; the
+candidate budget, fusion policy, embedding model and immutable citations stayed
+fixed. The hypothesis was that localized evidence in long events could enter the
+lexical candidate pool more reliably than with whole-event BM25.
+
+Synthetic checks demonstrated that mechanism, but also exposed two disadvantages:
+quoted phrases longer than the overlap can cross a passage boundary and lose
+their lexical match, and concentrated incidental keywords can outrank useful
+concepts distributed throughout an event. Passing contract checks does not turn
+those cases into quality improvements. Literal search retained its original path.
+
+The final prototype used a contentless passage index and deferred the discarded
+whole-event lexical query until fallback was needed. Complete response and
+fallback checks passed on synthetic fixtures, including concurrent publication.
+A smaller reused workload passed timing and storage checks, but a separately
+frozen synthetic workload of 60,000 events and 67,500 passages failed admission:
+
+| Lexical phase p95 | Baseline | Candidate | Preset maximum |
+| --- | ---: | ---: | ---: |
+| Warm | 130.5 ms | 212.6 ms | 380.5 ms |
+| Advisory cold | 220.3 ms | 1,465.0 ms | 470.3 ms |
+
+The comparison included query validation, coverage and index-population checks,
+used mirrored execution order, and retained the baseline covering metadata index.
+Cold runs used fresh processes and per-file cache-eviction hints; these do not
+guarantee an empty operating-system cache. Storage and per-process memory passed
+their limits on this workload. Earlier inherited process-memory statistics were
+insufficient to establish memory overhead; the scale run measured each executed
+worker's own peak instead.
+
+The prototype was rejected without changing the limits or tuning on fresh
+questions. The larger planned scale run, full-hybrid qualification and fresh
+answer-quality evaluation did not run. This is a resource rejection of the tested
+implementation, not evidence that passage retrieval generally worsens accuracy.
+No production behavior changed; private experiment artifacts remain outside the
+repository.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
