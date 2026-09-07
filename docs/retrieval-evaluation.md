@@ -204,6 +204,34 @@ implementation, not evidence that passage retrieval generally worsens accuracy.
 No production behavior changed; private experiment artifacts remain outside the
 repository.
 
+## Cross-channel excerpt experiment
+
+Another unshipped prototype compared the existing lexical and semantic excerpts
+when both channels retrieved the same immutable event. It switched excerpts only
+for a strict advantage under the existing snippet query-coverage objective,
+preserving event scores, ordering, metadata and citation identity. Only the
+displayed excerpt and its original offset could change.
+
+Independent, sealed synthetic fixtures exposed the weakness of that proxy.
+Across 14 deliberately adversarial excerpt pairs, visible supported facts fell
+from 11/19 to 7/19: five fact gains across three cases, nine losses across seven
+cases, and four unchanged cases. The losses included question echoes, stale
+proposals, negation and code comments. All selected bodies survived the default
+response budget. These constructed pairs are not a representative accuracy
+estimate or evidence of their frequency in real sessions.
+
+A separate synthetic integration check reproduced both a benefit and an echo
+failure through the actual renderers and hybrid search, using deterministic test
+embeddings. In the failure, the replacement offset also hid the answer when
+expanding bounded context. Identical event rankings therefore did not establish
+equivalent answer evidence. The selector was rejected before fresh external or
+private quality evaluation; production remained unchanged.
+
+The distinction agrees with the limitations discussed in
+[query-aware snippet research](https://aclanthology.org/2022.emnlp-main.197/):
+word overlap alone does not capture semantic or document context. That work does
+not validate this prototype's policy or quantify its production impact.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
