@@ -232,6 +232,43 @@ The distinction agrees with the limitations discussed in
 word overlap alone does not capture semantic or document context. That work does
 not validate this prototype's policy or quantify its production impact.
 
+## Citation-centered context experiment
+
+An unshipped prototype preserved the cited offset when shortening context to fit
+the response byte budget. It selected an exact source slice around that offset,
+kept cumulative truncation metadata, and ensured the reducer made progress.
+Search ordering, embeddings and source citations stayed fixed. The hypothesis
+was that preserving the search anchor would retain more answer evidence than
+repeatedly keeping only an event's prefix.
+
+Independent synthetic cases demonstrated both benefits and losses: an anchor can
+point to incidental text while the answer occurs elsewhere. The actual client
+transport was replayed with its metadata included before applying the final
+budget. Source-first rubrics and blind, independently reviewed judgments scored
+the text actually delivered, with each budget reported separately.
+
+| Complete answers | Baseline | Candidate |
+| --- | ---: | ---: |
+| Fresh public sample, 32,768 bytes | 14/24 | 14/24 |
+| Fresh public sample, 8,192 bytes | 12/24 | 13/24 |
+| Historical private regression, 32,768 bytes | 17/30 | 17/30 |
+| Historical private regression, 8,192 bytes | 14/30 | 13/30 |
+
+The public sample had one complete-answer gain and no losses at the smaller
+budget. The historical regression had no complete-answer gains and one loss;
+individual facts had two gains and three losses. Six controls per sample and
+budget produced no misleading answers under either policy. Public histories had
+source-label and missing-timestamp limitations; all selected cases were retained.
+Historical questions reused previously selected citations, with no new search or
+embedding calls, and are regression evidence rather than a fresh quality sample.
+
+The candidate was rejected without adjusting the cropping geometry. The fresh
+private reserve remained unread. An isolated package test run reported 335 tests
+passing, and contract checks verified source slices and bounds, but those checks
+do not override the answer-quality regression. Baseline reducer timeouts in
+separate restrictive synthetic runs were recorded as operational failures, not
+counted as answer-quality wins. No runtime change was deployed.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
