@@ -269,6 +269,34 @@ do not override the answer-quality regression. Baseline reducer timeouts in
 separate restrictive synthetic runs were recorded as operational failures, not
 counted as answer-quality wins. No runtime change was deployed.
 
+## Identifier decomposition experiment
+
+A separate unshipped prototype added a low-weight lexical field containing
+components of case-delimited identifiers. Original text stayed indexed; literal
+search, semantic retrieval and fusion settings stayed unchanged. This tested a
+representation mismatch: ordinary words can match underscore-separated names
+under the existing tokenizer, but do not necessarily match camel-case names.
+[Identifier preprocessing research](https://assets.ptidej.net/Publications/Documents/ICPC11b.doc.pdf)
+motivated the experiment without establishing a benefit for session search.
+
+An independent author constructed 40 answerable cases across identifier recall,
+exact identifiers, ordinary prose, misleading code and multilingual/punctuation
+cases, plus eight scoped no-answer controls. Source-first labels were separately
+verified before retrieval. Two blind graders reviewed the delivered evidence and
+cross-reviewed each other's judgments before policy unblinding.
+
+Both policies supplied complete answers for 38/40 questions, with no paired wins
+or losses and no misleading answers on the controls. All 96 isolated executions
+completed. This is a synthetic lexical comparison, not a full-hybrid or real-user
+accuracy estimate. One false-premise question and mixed-language category
+limitations were retained and documented in the judgments.
+
+The candidate did not meet the preset requirement for a positive quality change.
+It was not tuned or deployed; full resource and fresh private confirmation runs
+were not admitted. Extra component tokens can change raw-query ranking, and
+phrases in the derived field can bridge identifiers separated in the source.
+Passing contract tests does not establish that those costs are worthwhile.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
