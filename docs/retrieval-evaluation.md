@@ -297,6 +297,55 @@ were not admitted. Extra component tokens can change raw-query ranking, and
 phrases in the derived field can bridge identifiers separated in the source.
 Passing contract tests does not establish that those costs are worthwhile.
 
+## Adjacent conversational context experiment
+
+An unshipped prototype embedded an assistant response together with its immediately
+preceding user message when the complete pair fit the existing 6,000-character
+limit. It retained raw vectors and original citations, used one semantic candidate
+stream, and preserved the baseline route when disabled or when role/time filters
+were present. [Conversational retrieval research](https://aclanthology.org/J19-1005/)
+motivated supplying missing conversational context; it did not establish that this
+particular representation would improve session retrieval.
+
+Independent synthetic diagnostics tied at 36/36 complete answers, with no
+misleading results on eight controls. An initial fixture version could not activate
+the candidate because its user events had synthetic origins. That run was invalid
+for candidate qualification; a uniformly corrected source-only fixture exercised
+all 88 expected pairs before the valid comparison. The small diagnostic corpus
+does not establish naturalistic accuracy.
+
+A frozen public comparison used 60 answerable-designated LongMemEval questions
+and 12 controls, excluding previously consumed question families. Source-first
+rubrics were independently verified before retrieval. Six questions lacked a
+required source-supported premise; they remained in the denominator and could not
+receive complete credit. Two agents graded randomized, blinded evidence and then
+cross-reviewed every case before unblinding, with no judgment changes.
+
+| Delivered complete-answer evidence | Baseline | Candidate |
+| --- | ---: | ---: |
+| All 60 designated answerable questions | 47/60 | 46/60 |
+| Controls with potentially misleading near matches | 8/12 | 8/12 |
+
+The paired table contained 46 shared successes, zero candidate-only successes,
+one baseline-only success and 13 shared misses. The candidate lost a previously
+known constraint needed to tailor advice. The net change was −1.7 percentage
+points, below the preset requirement of at least +5 points. One discordant pair
+does not establish a population-level regression (exact two-sided McNemar p=1).
+Control judgments concern tempting wrong-entity evidence, not observed agent
+answers or an abstention success rate.
+
+All 72 cases and 216 execution phases completed without provider errors or
+semantic fallback. Both policies reused actual query vectors with the same model.
+Delivered search and context evidence passed source, citation and byte-bound
+checks. The measurement covers a fixed top-10 search and neighboring-context
+workflow, not autonomous agent success, exhaustive filter coverage or production
+performance. Public-history overlap and agent-authored judgments limit inference.
+
+The candidate was rejected without tuning. A prospective stage-order amendment
+placed public quality before the expensive full resource comparison; resource,
+fresh private and deployment qualification therefore did not run and are not
+claimed as passed. The private reserve remained unread and production unchanged.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
