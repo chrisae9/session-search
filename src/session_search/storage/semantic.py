@@ -10,9 +10,12 @@ from dataclasses import replace
 
 from session_search.core.embeddings import validate_vector
 from session_search.core.records import Citation, digest
-from session_search.storage.catalog import Catalog, excerpt, match_offset
+from session_search.storage.catalog import Catalog
 from session_search.storage import metadata_index
 from session_search.storage.ranking import evidence_weight, rank_results
+from session_search.storage.snippets import select_snippet
+
+SEMANTIC_CANDIDATES = 200
 
 SEMANTIC_SCHEMA = """
 CREATE TABLE IF NOT EXISTS semantic_chunks (
@@ -160,6 +163,7 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                 + " AND ".join(conditions), args,
             )
             best: dict[int, tuple[float, int]] = {}
+            semantic_overflow = False
             while rows := cursor.fetchmany(256):
                 matrix = np.stack([np.frombuffer(row["vector"], dtype="<f4") for row in rows])
                 if matrix.shape[1] != provider.identity.dimensions or not np.isfinite(matrix).all():
@@ -172,25 +176,28 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                     if (previous is None or candidate[0] > previous[0]
                             or (candidate[0] == previous[0] and candidate[1] < previous[1])):
                         best[key] = candidate
-                if len(best) > 200:
+                semantic_overflow = semantic_overflow or len(best) > SEMANTIC_CANDIDATES
+                if len(best) > 2 * SEMANTIC_CANDIDATES:
                     # Match final ordering even when SQLite changes its scan order.
                     best = dict(heapq.nlargest(
-                        100, best.items(), key=lambda item: (item[1][0], -item[0]),
+                        SEMANTIC_CANDIDATES, best.items(),
+                        key=lambda item: (item[1][0], -item[0]),
                     ))
             semantic = []
             for row_id, (score, start) in sorted(
                 best.items(), key=lambda pair: (-pair[1][0], pair[0])
-            )[:100]:
+            )[:SEMANTIC_CANDIDATES]:
                 row = catalog.db.execute(
                     "SELECT e.*,r.project,r.title FROM events e JOIN revisions r "
                     "ON r.session_id=e.session_id AND r.revision=e.revision WHERE e.row_id=?",
                     (row_id,),
                 ).fetchone()
                 chunk = row["text"][start:start + 6000]
-                offset = start + match_offset(chunk, query.text)
+                position, preview = select_snippet(chunk, query.text)
+                offset = start + position
                 semantic.append({
                     "citation": Citation(row["session_id"], row["revision"], row["event_id"], offset).to_dict(),
-                    "excerpt": excerpt(chunk, query.text), "role": row["role"],
+                    "excerpt": preview, "role": row["role"],
                     "timestamp": row["timestamp"], "origin": row["origin"],
                     "project": row["project"], "title": row["title"], "score": score,
                     "_evidence_weight": evidence_weight(row["text"], row["role"], query),
@@ -201,7 +208,8 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             lexical["mode"] = "hybrid"
             lexical["semantic_available"] = True
             lexical["embedding_identity"] = provider.identity.key
-            lexical["more_matches"] = len(ordered) > query.limit
+            lexical["more_matches"] = (lexical["more_matches"] or semantic_overflow
+                                       or len(ordered) > query.limit)
             # Match presence through the vector key index. Stored vectors are
             # NOT NULL, so a missing joined key is exactly a missing vector;
             # reading the payload here would add unnecessary table lookups.
@@ -215,6 +223,8 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             ).fetchone()[0]
         except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
             lexical.update(mode="keyword", degraded=True, degradation=type(exc).__name__)
+            lexical["more_matches"] = (lexical["more_matches"]
+                                       or len(lexical["results"]) > query.limit)
             lexical["results"] = rank_results(query, lexical["results"])[:query.limit]
         return lexical
     finally:

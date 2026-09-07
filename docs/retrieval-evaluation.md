@@ -36,20 +36,31 @@ establish which values work best for coding-session evidence.
 
 ## Evidence selection
 
-Ordinary searches rank bounded lexical and semantic candidate pools with equal
-reciprocal-rank contributions, using a constant of 1. Strong matches near the top
+Ordinary hybrid searches use at least 50 lexical candidates and up to 200 semantic
+events. Both pools contribute equally through reciprocal rank, using a constant
+of 1. Strong matches near the top
 of either pool retain more influence than with the previous constant of 60.
 Message evidence receives more weight than tool transcripts. Additional heuristics
 downrank generated envelopes, repeated search invocations, planning preambles,
 and evaluation prose when those are not the requested subject. These are ranking
 hints, not relevance judgments or exclusions; they can also downrank useful text.
 
-Broad searches show distinct conversations before additional hits from the same
-conversation. A session-scoped search retains passage ordering so an agent can
+Broad searches discount each conversation's next hit by the number of its hits
+already selected plus one. This favors diversity while allowing a strong second
+answer to outrank weak hits from other conversations. The discount affects
+selection; returned scores remain the underlying fusion signals.
+A session-scoped search retains passage ordering so an agent can
 find the answer within a promising conversation. An exact session ID receives
 priority when that session is in the retrieved pool. Literal search bypasses
 these heuristics. Role, project, time and source filters still constrain candidates;
 immutable citations and context expansion are unchanged.
+
+When both channels retrieve an event, its stronger reciprocal-rank contribution
+selects the displayed passage; lexical evidence wins ties. A weak semantic hit
+therefore cannot overwrite a strong lexical offset elsewhere in a long event.
+Semantic excerpts favor a window covering distinct query terms and explicit
+phrases within the selected chunk. Keyword and literal excerpt placement is
+unchanged. Term coverage improves presentation, not factual confidence.
 
 Evaluate both conversation discovery and the actual answer passage. Finding the
 expected conversation does not establish that the first excerpt answers the
@@ -57,6 +68,16 @@ question. Keep repeated benchmark queries out of the judgment evidence, record
 paraphrase regressions, and use unseen topics before claiming general accuracy.
 The committed regression tests cover transcript noise, conversation diversity,
 explicit evidence requests, filtered fallback and citation integrity.
+
+For private history evaluation, select source evidence before writing questions
+and record required answer facts and immutable citations. Freeze development
+labels before tuning and use different sessions for held-out questions. Compare
+policies using the same query vectors and candidate pools, then validate the
+chosen implementation end to end. Blindly grade excerpts and expanded evidence
+separately, accepting equivalent answers beyond the initially selected citation.
+Report misses, partial answers, paired regressions, selection bias, and whether
+judgments came from people or agents. Keep transcripts and evaluation artifacts
+outside the checkout. A small convenience sample is not a general accuracy claim.
 
 ## Literal substring experiment
 

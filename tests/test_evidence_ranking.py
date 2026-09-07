@@ -41,11 +41,64 @@ def test_broad_search_diversifies_but_scoped_search_retains_passages(tmp_path):
         ingest(catalog, "a", [Event(str(i), "assistant", "archive recovery " * (i + 1))
                               for i in range(8)])
         ingest(catalog, "b", [Event("answer", "assistant", "archive recovery")])
-        broad = catalog.search(SearchQuery("archive recovery", limit=2))
+        broad = catalog.search(SearchQuery("archive recovery", limit=3))
         assert {r["citation"]["session_id"] for r in broad["results"]} == {"a", "b"}
         scoped = catalog.search(SearchQuery("archive recovery", session_id="a", limit=3))
         assert len(scoped["results"]) == 3
         assert {r["citation"]["session_id"] for r in scoped["results"]} == {"a"}
+
+
+def test_complementary_answer_can_outrank_weak_distinct_conversations():
+    from session_search.storage.ranking import rank_results
+
+    def hit(session, event, offset=0):
+        return {"citation": {"session_id": session, "revision": "r",
+                             "event_id": event, "offset": offset}, "excerpt": event}
+
+    lexical = [hit("incident", "diagnosis"), hit("incident", "adopted-fix")]
+    lexical.extend(hit(f"other-{i}", "mention") for i in range(8))
+    semantic = lexical[:2]
+    result = rank_results(SearchQuery("recovery decision"), lexical, semantic)
+    assert [x["citation"]["event_id"] for x in result[:2]] == ["diagnosis", "adopted-fix"]
+    assert result[2]["citation"]["session_id"] != "incident"
+
+
+def test_stronger_channel_keeps_its_passage_and_immutable_offset():
+    from session_search.storage.ranking import rank_results
+
+    lexical = {"citation": {"session_id": "incident", "revision": "r",
+                            "event_id": "answer", "offset": 10000},
+               "excerpt": "the exact recovery decision"}
+    weak_semantic = {**lexical, "citation": {**lexical["citation"], "offset": 0},
+                     "excerpt": "unrelated introduction"}
+    others = [{"citation": {"session_id": str(i), "revision": "r", "event_id": "e"}}
+              for i in range(99)]
+    results = rank_results(SearchQuery("recovery"), [lexical], [*others, weak_semantic])
+    hit = next(x for x in results if x["citation"]["session_id"] == "incident")
+    assert hit["citation"]["offset"] == 10000
+    assert hit["excerpt"] == lexical["excerpt"]
+
+
+def test_answer_survives_more_than_one_hundred_search_transcripts(tmp_path):
+    class RankedProvider(Provider):
+        def embed(self, text, *, query=False):
+            if text.startswith("Volumes"):
+                return [0.9, (1 - 0.9 ** 2) ** 0.5]
+            return [1.0, 0.0]
+
+    question = "what prevented the repeated startup failure"
+    with Catalog(tmp_path) as catalog:
+        ingest(catalog, "noise", [
+            Event(str(i), "tool", f'benchmark invocation: search("{question}")')
+            for i in range(150)
+        ])
+        answer = "Volumes must become available before launching the daemon."
+        ingest(catalog, "incident", [Event("answer", "assistant", answer)])
+        index_pending(catalog, RankedProvider(), limit=200)
+        result = hybrid_search(catalog, SearchQuery(question), RankedProvider())
+        assert result["results"][0]["citation"]["session_id"] == "incident"
+        expanded = catalog.context([result["results"][0]["citation"]], neighbors=0)
+        assert expanded["results"][0]["events"][0]["text"] == answer
 
 
 def test_outage_ranking_and_role_time_filters(tmp_path):

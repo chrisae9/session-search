@@ -28,32 +28,39 @@ def evidence_weight(text, role, query):
 
 
 def rank_results(query, lexical, semantic=()):
-    """Fuse ranks, then expose distinct conversations before repeated hits.
+    """Fuse ranks, balancing complementary passages against repeated sessions.
 
     A small reciprocal-rank constant retains the distinction between the head
     and tail of each candidate list. Evidence weights do not alter membership.
     Scoped searches keep every matching passage in ordinary score order.
     """
-    merged, scores = {}, {}
+    merged, scores, contributions = {}, {}, {}
     for candidates in (lexical, semantic):
         for rank, result in enumerate(candidates, 1):
             cite = result["citation"]
             key = (cite["session_id"], cite["revision"], cite["event_id"])
-            merged[key] = result
-            scores[key] = scores.get(key, 0) + 1 / (1 + rank)
+            contribution = 1 / (1 + rank)
+            # Score the event using both channels, but present the passage from
+            # its stronger channel. A weak semantic tail must not overwrite a
+            # strong lexical citation pointing into a different part of a log.
+            if contribution > contributions.get(key, 0):
+                merged[key] = result
+                contributions[key] = contribution
+            scores[key] = scores.get(key, 0) + contribution
     for key, result in merged.items():
         scores[key] *= result.get("_evidence_weight", 1.0)
     ordered = sorted(scores, key=lambda key: (
         key[0] != query.text.strip(), -scores[key], key,
     ))
     if not query.session_id:
-        seen, distinct, repeated = set(), [], []
-        for key in ordered:
-            if key[0] in seen:
-                repeated.append(key)
-            else:
-                seen.add(key[0])
-                distinct.append(key)
-        ordered = distinct + repeated
+        remaining, seen, ordered = set(ordered), {}, []
+        while remaining:
+            key = min(remaining, key=lambda key: (
+                key[0] != query.text.strip(),
+                -scores[key] / (1 + seen.get(key[0], 0)), key,
+            ))
+            remaining.remove(key)
+            ordered.append(key)
+            seen[key[0]] = seen.get(key[0], 0) + 1
     return [{**{k: v for k, v in merged[key].items() if k != "_evidence_weight"},
              "score": scores[key]} for key in ordered]

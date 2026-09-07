@@ -111,6 +111,51 @@ def test_background_admission_and_outage_bound_do_not_block_queries(tmp_path):
         assert catalog.search(SearchQuery('evidence'))['results']
 
 
+@pytest.mark.parametrize("count,limit", [(0, 10), (10, 10), (11, 10), (50, 10),
+                                         (51, 10), (101, 100)])
+def test_outage_reports_matches_beyond_display_limit(tmp_path, count, limit):
+    class Offline(FakeProvider):
+        def embed(self, *args, **kwargs):
+            raise OSError("offline")
+
+    with Catalog(tmp_path) as catalog:
+        events = tuple(Event(str(i), "assistant", "recovery evidence") for i in range(count))
+        events += (Event("excluded", "user", "recovery evidence"),)
+        catalog.ingest(SessionRevision("s", events), producer="d", request_id="outage")
+        result = hybrid_search(catalog, SearchQuery("recovery", role="assistant", limit=limit),
+                               Offline())
+        assert result["mode"] == "keyword" and result["degraded"]
+        assert len(result["results"]) == min(count, limit)
+        assert result["more_matches"] is (count > limit)
+
+
+@pytest.mark.parametrize("count", [99, 100, 101, 520])
+def test_semantic_pool_reports_overflow_at_maximum_display_limit(tmp_path, count):
+    with Catalog(tmp_path) as catalog:
+        events = tuple(Event(str(i), "assistant", "recovery evidence") for i in range(count))
+        # Extra chunks from one event must not count as extra matching events.
+        events = (Event("0", "assistant", "recovery evidence " * 1000), *events[1:])
+        catalog.ingest(SessionRevision("s", events), producer="d", request_id="semantic-overflow")
+        index_pending(catalog, FakeProvider())
+        result = hybrid_search(catalog, SearchQuery("restore", limit=100), FakeProvider())
+        assert result["mode"] == "hybrid"
+        assert len(result["results"]) == min(count, 100)
+        assert result["more_matches"] is (count > 100)
+
+
+def test_hybrid_preserves_lexical_overflow_without_semantic_matches(tmp_path):
+    from session_search.storage.semantic import prepare_chunks
+
+    with Catalog(tmp_path) as catalog:
+        events = tuple(Event(str(i), "assistant", "recovery evidence") for i in range(101))
+        catalog.ingest(SessionRevision("s", events), producer="d", request_id="lexical-overflow")
+        prepare_chunks(catalog)
+        result = hybrid_search(catalog, SearchQuery("recovery", limit=100), FakeProvider())
+        assert result["mode"] == "hybrid"
+        assert len(result["results"]) == 100
+        assert result["more_matches"]
+
+
 def test_model_identity_change_never_reuses_vectors(tmp_path):
     with Catalog(tmp_path) as catalog:
         populate(catalog)
