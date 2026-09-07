@@ -33,10 +33,12 @@ def bounded_response(response: dict, budget: int = 16384) -> dict:
         # Shorten text before losing a match. Keep the immutable citation intact.
         candidates = []
         for item in result.get("results", []):
-            if len(item.get("excerpt", "")) > 128:
+            # A shortened prefix retains 128 source characters plus an ellipsis.
+            # At length 129 another shortening would make no progress.
+            if len(item.get("excerpt", "")) > 129:
                 candidates.append((item, "excerpt"))
             for event in item.get("events", []):
-                if len(event.get("text", "")) > 128:
+                if len(event.get("text", "")) > 129:
                     candidates.append((event, "text"))
         if candidates:
             obj, key = max(candidates, key=lambda pair: len(pair[0][pair[1]]))
