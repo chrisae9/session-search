@@ -79,6 +79,90 @@ Report misses, partial answers, paired regressions, selection bias, and whether
 judgments came from people or agents. Keep transcripts and evaluation artifacts
 outside the checkout. A small convenience sample is not a general accuracy claim.
 
+## Generalization checks
+
+Freeze the hypothesis, candidate implementation, context budget and acceptance
+criteria before inspecting new search results. Prior questions remain regression
+checks after their outcomes have been examined. Do not add query-specific rules,
+select favorable cases from retrieval output, or repeatedly tune against a
+held-out set. A failed candidate may be a useful result without becoming a
+runtime change.
+
+Select private source sessions from metadata before reading their contents, then
+author questions from verified evidence. Independently check that a proposed
+change, a reported action and a verified outcome have not been conflated. Record
+rejected sources and label repairs before running retrieval. Reserve sessions
+must remain unread until a separately defined confirmation experiment needs them.
+Keep ambiguous questions and questions with verified absence within an explicit
+session scope separate from answerable cases; returning candidates does not itself
+establish correct abstention.
+
+A fixed comparison tested two isolated ranking hypotheses: equal-weight min-max
+score fusion and removal of the planning/evaluation prose penalties. The former
+was motivated by [score-fusion research](https://arxiv.org/abs/2210.11934); the latter
+tested meaning-preserving invariance, following the approach in
+[CheckList](https://aclanthology.org/2020.acl-main.442/). Neither candidate changed
+the embedding model, candidate windows, filters or citation format. Parameters
+were not selected from private evaluation results.
+
+The external check used a deterministic, category-balanced sample from
+[LongMemEval](https://github.com/xiaowu0162/LongMemEval): 24 answerable questions
+and six separately reported abstention controls. All supplied history events
+were searchable; answer annotations were excluded from indexed text. Each paired
+comparison reused query embeddings and candidate pools.
+
+The source was `longmemeval_s_cleaned.json` at dataset revision
+`98d7416c24c778c2fee6e6f3006e7a073259d48f`. Selection took the four lowest
+SHA-256 values of seed plus question ID within each answerable question type,
+then the six lowest among abstention IDs. The seed was
+`session-search-generalization-round3-20260907`.
+
+| Policy | Mean labeled-evidence recall at 10 | All required labeled evidence | Paired recall wins / losses |
+| --- | ---: | ---: | ---: |
+| Baseline | 86.8% | 19/24 | — |
+| Equal-weight min-max fusion | 75.0% | 17/24 | 0 / 5 |
+| Remove prose penalties | 86.8% | 19/24 | 0 / 0 |
+
+These measure retrieval of labeled evidence, not complete answer accuracy or the
+full benchmark. Min-max fusion was rejected. Removing prose penalties improved
+fixed-pool style invariance but also regressed a synthetic transcript-noise case;
+the external tie did not establish better answer quality. Neither result alone
+justifies deployment. Repeated use of this sample is regression testing, not fresh
+confirmation.
+
+The prose-penalty candidate subsequently failed a sealed private comparison of
+30 source-authored questions across six categories, with six separate controls.
+Two agents graded opaque paired rankings independently; a third adjudicated
+disagreements and paired differences before the assignment key was opened.
+Both original graders agreed on these complete-answer metrics:
+
+| Bounded expanded evidence | Baseline | Remove prose penalties |
+| --- | ---: | ---: |
+| Complete answer across the top 10 | 17/30 | 16/30 |
+| Complete answer in the first hit | 10/30 | 9/30 |
+| First complete-hit reciprocal rank, mean | 0.419 | 0.401 |
+
+There were no wins in complete-answer coverage, first-hit completeness or
+first-complete-hit rank. The candidate lost one multipart answer from the top 10
+and worsened first-complete-hit rank in two other cases. Neither candidate was
+adopted. No query-specific exceptions or follow-up parameter search were added.
+
+Each cited event received at most 2,800 characters of context, with no neighboring
+events or follow-up searches. These are deliberately bounded retrieval judgments,
+not end-to-end agent success rates. The source selection required inspecting 84
+discovery transcripts to obtain 30 eligible questions; the resulting small,
+agent-authored sample is not representative of every user query. The 90-source
+reserve remained unread. Do not compare this sample's success rate directly with
+earlier, different private question sets.
+
+Both graders agreed on paired answer-quality losses. They differed on whether
+two unchanged first hits were misleading or merely confusable; that sensitivity
+does not favor either policy and remains recorded. Immutable evidence, filters,
+context bounds and embedding identity passed the collection audit, with no
+fallback. Historical recursive exclusion sets were not separately snapshotted,
+so their exact earlier membership cannot be independently reconstructed from
+later catalog state. Private evidence and full judgments remain outside the repo.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
