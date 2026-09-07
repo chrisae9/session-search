@@ -346,6 +346,46 @@ placed public quality before the expensive full resource comparison; resource,
 fresh private and deployment qualification therefore did not run and are not
 claimed as passed. The private reserve remained unread and production unchanged.
 
+## CPU reranking experiment
+
+A private, optional cross-encoder prototype reranks the first 50 already-fused
+event excerpts, then retains the remaining candidates in their original order.
+It uses the original query and selected excerpt only, with stable descending
+logit ordering and no score blending. Filters, source text, immutable citations,
+embedding identity and the index remain unchanged. This prototype is not a
+released configuration option.
+
+The fixed candidate uses `cross-encoder/ms-marco-TinyBERT-L2-v2`, revision
+`81d1926f67cb8eee2c2be17ca9f793c7c3bd20cc`, with the owner's quantized AVX2 ONNX
+artifact. CPU feasibility motivated selection; target-quality outcomes did not.
+Its isolated helper loads verified local bytes, admits one inference at a time,
+and falls back to the original response on failure. A 500 ms warm-stage deadline
+is a failure bound, not an allowance to exceed the existing end-to-end latency
+gate. Full resource and transport qualification remain open.
+
+Source-first synthetic diagnostics covered 24 answerable questions and six
+controls over one shared 60-session corpus. Both policies delivered complete
+required evidence for 24/24 questions. Blind grading and independent cross-review
+identified one potentially misleading control for the baseline and none for the
+candidate; all 30 candidate requests applied without fallback. This is a
+correlated synthetic test with a ceiling on answerable cases, not evidence of
+better natural-session accuracy or an observed reduction in wrong agent answers.
+
+The planned fresh public sample required 60 answerables and 12 controls after
+excluding 132 previously used question IDs and 131 base families. Only four
+eligible controls remained in the pinned dataset. Selection stopped without
+replacement, before producing a sample or running a public model comparison.
+Public quality, resource and private confirmation gates therefore remain unrun.
+Any independent replacement source requires a new prospective protocol.
+
+The experiment also exposed a separate response-budget defect: shortening a
+129-character string to 128 characters plus an ellipsis could loop indefinitely.
+The core fix only shortens strings longer than 129 characters, allowing result
+removal or an explicit metadata-budget error when further shortening cannot help.
+It passed 13 focused tests and the 348-test repository suite. Both experimental
+policies received the same fix before retrieval, so this reliability improvement
+is not counted as a reranker quality gain.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the
