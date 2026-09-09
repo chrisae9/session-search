@@ -1,12 +1,20 @@
 name: qualification
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Qualification to run
+        type: choice
+        default: all
+        options: [all, ssh, native]
 permissions:
   contents: read
 concurrency:
-  group: qualification-${{ github.ref }}
+  group: qualification-${{ github.ref }}-${{ inputs.scope }}
   cancel-in-progress: true
 jobs:
   ssh:
+    if: inputs.scope != 'native'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -28,14 +36,15 @@ jobs:
           ListenAddress 127.0.0.1
           HostKey $RUNNER_TEMP/host-key
           PidFile $RUNNER_TEMP/sshd.pid
-          AuthorizedKeysFile $RUNNER_TEMP/client-key.pub
+          AuthorizedKeysFile $HOME/.ssh/qualification-authorized-keys
           PasswordAuthentication no
           KbdInteractiveAuthentication no
-          UsePAM no
+          UsePAM yes
           AllowUsers $USER
           EOF
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
+          install -m 600 "$RUNNER_TEMP/client-key.pub" "$HOME/.ssh/qualification-authorized-keys"
           printf '[127.0.0.1]:22222 %s\n' "$(cat "$RUNNER_TEMP/host-key.pub")" > "$RUNNER_TEMP/known-hosts"
           cat >> "$HOME/.ssh/config" <<EOF
           Host session-search-ci
@@ -48,8 +57,8 @@ jobs:
             UserKnownHostsFile $RUNNER_TEMP/known-hosts
           EOF
           sudo mkdir -p /run/sshd
-          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd.conf"
-          ssh -o BatchMode=yes session-search-ci true
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd.conf" -E "$RUNNER_TEMP/sshd.log"
+          ssh -o BatchMode=yes session-search-ci true || { sudo cat "$RUNNER_TEMP/sshd.log"; exit 1; }
       - name: Validate systemd templates
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -62,6 +71,7 @@ jobs:
         run: |
           if test -f "$RUNNER_TEMP/sshd.pid"; then sudo kill "$(cat "$RUNNER_TEMP/sshd.pid")"; fi
   native:
+    if: inputs.scope != 'ssh'
     runs-on: macos-latest
     timeout-minutes: 35
     steps:
