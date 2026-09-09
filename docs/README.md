@@ -1,10 +1,12 @@
 # Documentation
 
-Start with the [synthetic quickstart](quickstart.md) to see capture, search, and
-immutable citation expansion without using personal history.
+Give the [installation guide](agent-install.md) to your coding agent to set up
+retrieval and background capture. The [fictional walkthrough](quickstart.md)
+provides a separate smoke test without personal history.
 
 | Task | Guide |
 | --- | --- |
+| Automate installation | [Agent installation procedure](agent-install.md) |
 | Connect an agent | [MCP registration and optional skill](usage.md#agent-interface) |
 | Capture personal history | [Local capture and search](usage.md#local-capture-and-search) |
 | Configure a shared search service | [HTTP server and client](usage.md#http-server-and-client) |

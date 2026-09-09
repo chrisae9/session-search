@@ -1,11 +1,13 @@
 # Source provenance
 
-The Codex parser and shared normalization module were extracted from a pre-existing
-session-search implementation. Parser regression tests accompany the extraction.
-The original import did not include a license. Authorship or upstream permission
-must be confirmed before public distribution; private provenance records retain
-the source history for that review.
+The Codex parser and shared normalization module originated in the repository
+author's earlier session-search skill. The author confirmed ownership of that
+code and its inclusion under this repository's Apache-2.0 license on 2026-09-09.
+Parser regression tests accompany the extraction; private development records
+retain the earlier source history.
 
-New application, storage, and interface code is developed for this repository under
-Apache-2.0. No code from the reviewed third-party memory projects has been copied.
-Dependencies retain their own licenses and require a distribution audit before release.
+Application, storage, interface, and parser code in this repository is licensed
+under Apache-2.0. No code from the reviewed third-party memory projects has been
+copied. Dependencies retain their own licenses and are installed separately.
+Redistributing dependency or model bundles requires retaining their applicable
+licenses and notices; the repository does not include such bundles.

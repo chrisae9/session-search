@@ -1,67 +1,53 @@
 # Session Search
 
-Search past Codex conversations from the terminal or through MCP. Find an old
-command, recover the reasoning behind a change, or give an agent the original
-conversation to work from.
+Give your coding agent access to past conversations: decisions, commands, failed
+approaches, and the context behind a change. The agent searches recorded evidence
+and follows citations back to the original exchange.
 
-Results include excerpts and citations that open the recorded conversation, even
-if the source session has changed since capture. You can filter by project,
-session, role, or time. Keyword search works without a model; optional embeddings
-let you search by meaning.
+Codex session files are the live source. New conversations are captured in the
+background, and the agent uses three MCP tools—`search`, `context`, and `status`—to
+retrieve them when earlier work is relevant. The included skill teaches it to
+check the evidence, exclude its current conversation, and report missing coverage.
 
-## Install and search
+## Ask your agent to set it up
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/).
-The commands below use a POSIX shell on macOS or Linux. Install from source:
+Give your coding agent this repository and ask:
 
-```sh
-git clone https://github.com/chrisae9/session-search.git
-cd session-search
-uv sync --locked --no-dev --extra mcp
-```
+> Install Session Search from https://github.com/chrisae9/session-search.
+> Follow docs/agent-install.md. Configure local search over my Codex history,
+> install the retrieval skill, and schedule background capture. Verify search and
+> citation expansion through MCP, then tell me what is ready and what is still
+> indexing. Preserve any existing installation and history.
 
-Capture your local Codex history into a separate search store, then search it:
+The [agent installation guide](docs/agent-install.md) covers discovery, setup,
+automatic refresh, verification, and updates. The agent needs terminal access and
+permission to configure your machine. This repository provides the procedure;
+installation still requires the agent to carry it out.
 
-```sh
-search_store="$HOME/.local/share/session-search"
-uv run --no-sync session-search --data-dir "$search_store" capture \
-  --codex-home "$HOME/.codex" --producer workstation
-uv run --no-sync session-search --data-dir "$search_store" search \
-  'duplicate requests' --literal
-```
+## What you can ask afterward
 
-Capture leaves the source files in place. Run it again to pick up new or changed
-sessions. If you use a custom Codex home, pass that directory to `--codex-home`.
-To try the same workflow with a fictional conversation first, follow the
-[example walkthrough](docs/quickstart.md), which also shows how to expand a citation.
+- “Find the conversation where we decided how retries should work.”
+- “What did we try last time this test failed?”
+- “Before changing this, check whether we discussed the same constraint before.”
 
-## Use it from your agent
+Search returns excerpts with citations to specific recorded revisions. The agent
+can expand those citations and filter by project, session, role, or time. A search
+hit is evidence to inspect, not a guarantee that an old proposal was adopted.
 
-From the same checkout and shell, register the installed executable with Codex:
+Local keyword search needs no model or server. Optional embeddings support
+searching by meaning; a shared service lets agents retrieve history captured on
+multiple computers. Models and remote connections are configured explicitly.
 
-```sh
-codex mcp add session-search -- "$PWD/.venv/bin/session-search" \
-  --data-dir "$search_store" mcp
-```
+## Inside the repository
 
-The agent gets three read-only tools: `search`, `context`, and `status`. Capture
-runs separately. See [agent setup](docs/usage.md#agent-interface) for the optional
-skill, current-conversation exclusion, and other connection options.
+- [Agent installation](docs/agent-install.md) and [retrieval skill](skills/session-search/SKILL.md)
+- [Usage reference](docs/usage.md) and [background services](deploy/README.md)
+- [Architecture](docs/architecture-rendered.md) and [search evaluation](benchmarks/README.md)
+- [Contributing](CONTRIBUTING.md) and [fictional walkthrough](docs/quickstart.md)
 
-## Beyond keyword search
+Development version; see [implementation status](docs/implementation.md) for tested
+behavior and remaining work. Python 3.11+ is required. MCP, server, and inference
+support are optional dependencies. [All documentation](docs/README.md).
 
-- [Semantic search](docs/usage.md#embeddings): configure a local model or an explicit
-  embedding endpoint. Models are not downloaded automatically.
-- [Scheduled capture](deploy/README.md): keep history current without manual runs.
-- [Shared service](docs/usage.md#http-server-and-client): search across computers
-  using authenticated clients. Local use needs no server.
-- [Architecture](docs/architecture-rendered.md), [search evaluation](benchmarks/README.md),
-  and [contributing](CONTRIBUTING.md): understand the code and run the checks.
-
-This is a development version. Keyword capture and search have no third-party
-runtime dependencies; MCP, server, and inference support are optional extras.
-See [feature status](docs/implementation.md) for tested behavior and remaining work,
-and the [documentation index](docs/README.md) for backup and recovery procedures.
-
-New application code is Apache-2.0. The [source provenance record](docs/provenance.md)
-describes the parser permissions and dependency review still required before public distribution.
+Apache-2.0. See [source provenance](docs/provenance.md) for the origin of the parser
+and dependency licensing.

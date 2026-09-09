@@ -47,6 +47,6 @@ tests while developing, then run the relevant full checks before submitting chan
 - Explain the user-visible change and verification in the change description.
   Keep documentation generic and link to existing procedures instead of copying them.
 
-New application code is Apache-2.0. The [provenance record](docs/provenance.md)
-describes the unresolved parser permissions and dependency review required before
-public distribution.
+Repository code is Apache-2.0. The [provenance record](docs/provenance.md)
+describes the parser's origin and ownership confirmation. Dependencies retain
+their own licenses.
