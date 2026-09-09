@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" role="img" aria-labelledby="title desc">
   <title id="title">Session Search architecture</title>
-  <desc id="desc">A coding agent searches earlier conversations through MCP and receives excerpts with immutable citations. Session Search queries its SQLite history and index. Codex session files and historical imports are captured locally or uploaded by clients. An optional local model or remote embedding server embeds evidence and queries. In a shared deployment, the primary publishes verified evidence and vector snapshots to an optional read-only search replica for failover.</desc>
+  <desc id="desc">A coding agent searches earlier conversations through MCP and receives excerpts with immutable citations. Session Search queries its SQLite history and index. Each device captures its Codex sessions and queues authenticated uploads to the shared primary, retrying after outages. Agents on connected devices search the combined history. Historical imports can also populate the catalog. An optional local model or remote embedding server embeds evidence and queries. In a shared deployment, the primary publishes verified evidence and vector snapshots to an optional read-only search replica for failover.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#63738a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
     <marker id="accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#5069b0" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
@@ -36,15 +36,18 @@
     <text x="332" y="336" text-anchor="middle" font-size="13" fill="#63738a">Excerpts + citations</text>
 
     <!-- Sources are the origin of the evidence, on the far right. -->
-    <rect x="856" y="142" width="224" height="133" rx="12" fill="#fff" stroke="#cbd5e1"/>
-    <g transform="translate(876 161)" fill="none" stroke="#63738a" stroke-width="1.6" stroke-linejoin="round">
-      <path d="M3 0 h18 l7 7 v22 H3z M21 0 v7 h7 M9 14 h13 M9 20 h13"/>
+    <rect x="856" y="128" width="224" height="159" rx="12" fill="#fff" stroke="#cbd5e1"/>
+    <g transform="translate(876 153)" fill="none" stroke="#63738a" stroke-width="1.6" stroke-linejoin="round">
+      <rect width="26" height="19" rx="2"/><path d="M-3 24 h32"/>
+      <rect x="40" width="26" height="19" rx="2"/><path d="M37 24 h32"/>
     </g>
-    <text x="876" y="218" font-size="19" font-weight="600" fill="#17243a">Session sources</text>
-    <text x="876" y="242" font-size="14" fill="#63738a">Codex files · historical imports</text>
+    <text x="954" y="173" font-size="13" fill="#63738a">Multiple devices</text>
+    <text x="876" y="218" font-size="19" font-weight="600" fill="#17243a">Session sync</text>
+    <text x="876" y="242" font-size="14" fill="#63738a">Codex sessions on each device</text>
+    <text x="876" y="266" font-size="13" fill="#63738a">Per-device capture + upload queue</text>
     <path d="M848 228 H725" fill="none" stroke="#63738a" stroke-width="1.6" marker-end="url(#arrow)"/>
-    <text x="786" y="201" text-anchor="middle" font-size="13" fill="#63738a">Background capture</text>
-    <text x="786" y="218" text-anchor="middle" font-size="13" fill="#63738a">or queued upload</text>
+    <text x="786" y="201" text-anchor="middle" font-size="13" fill="#63738a">Authenticated sync</text>
+    <text x="786" y="218" text-anchor="middle" font-size="13" fill="#63738a">Retries after outages</text>
 
     <!-- Optional services extend the central engine. -->
     <rect x="414" y="467" width="302" height="114" rx="12" fill="#eef2fa" stroke="#cbd5e1"/>
@@ -64,7 +67,7 @@
     <text x="862" y="347" font-size="13" fill="#63738a">Verified replication</text>
     <text x="862" y="366" font-size="13" fill="#63738a">from the primary</text>
 
-    <text x="40" y="545" font-size="13" fill="#63738a">Keyword retrieval works independently</text>
-    <text x="40" y="565" font-size="13" fill="#63738a">of embeddings and replication.</text>
+    <text x="40" y="545" font-size="13" fill="#63738a">Each device uploads to one primary.</text>
+    <text x="40" y="565" font-size="13" fill="#63738a">Agents search the shared history.</text>
   </g>
 </svg>

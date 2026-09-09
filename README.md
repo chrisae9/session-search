@@ -1,6 +1,6 @@
 # Session Search
 
-![Architecture: a coding agent retrieves cited history through Session Search over MCP. Session sources feed the catalog; an optional embedding server and read-only replica support semantic search and failover.](docs/overview.svg)
+![Architecture: a coding agent retrieves cited history through Session Search over MCP. Per-device capture and durable upload queues sync sessions to a shared primary; an optional embedding server and read-only replica support semantic search and failover.](docs/overview.svg)
 
 A personal project for searching previous Codex conversations through MCP.
 It captures session history in the background and returns excerpts with citations
@@ -10,7 +10,9 @@ across sessions.
 The implementation uses Python and SQLite, with keyword search and optional
 embeddings. Capture and keyword retrieval work independently of the embedding
 model. Citations identify immutable revisions; filters scope results by project,
-session, role, and time. It runs locally or as an authenticated shared service.
+session, role, and time. It runs locally or as an authenticated shared service. In shared mode, each device
+captures its own sessions and queues uploads to one primary; agents search the
+combined history. This syncs searchable evidence, not native Codex session lists.
 
 | Reference | Contents |
 | --- | --- |
