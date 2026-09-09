@@ -386,6 +386,37 @@ It passed 13 focused tests and the 348-test repository suite. Both experimental
 policies received the same fix before retrieval, so this reliability improvement
 is not counted as a reranker quality gain.
 
+### Subsequent bounded screen: rejected for deployment
+
+A separate, prospectively frozen synthetic screen reused the unchanged TinyBERT
+candidate and current hybrid baseline. It covered 48 answerable coding cases and
+12 explicit unknown-answer controls across 1,268 fictional conversations. Both
+policies used the same embedding vectors, top-ten search and neighboring context
+under the existing response budgets. Scoring required the designated source facts
+to remain visible in delivered evidence; labels were not indexed.
+
+The baseline delivered complete evidence for 18/48 answerables; the candidate
+delivered 21/48, with four wins and one loss. Both retained all 12 controls. The
+frozen rule required at least three net gains **and zero lost baseline-complete
+cases**. The candidate therefore failed and was not deployed. In the lost case,
+reranking displaced a final deployed queue decision with unselected proposals.
+All 60 candidate calls applied without fallback; citation/source checks passed
+and the isolated catalog remained unchanged.
+
+The first collector stopped after 40 completed pairs because its project-filter
+check incorrectly assumed equality instead of the API's substring semantics.
+Before grading, a recorded technical amendment corrected only that check and
+allowed one replay of the same frozen cases with shared vectors. The incomplete
+attempt was retained; the replay was not treated as a fresh holdout.
+
+These procedural cases have correlated template variants and deliberately crowded
+distractors. The paired exact p-value was 0.375 and does not establish a natural
+accuracy gain. Controls measure delivery of an explicit unknown, not actual
+hallucinated answers. This result rejects the tested configuration for deployment;
+it does not establish that reranking in general is ineffective. No further tuning
+or replacement candidate followed. The earlier experiments remain closed, and
+the response-budget reliability fix remains a separate result.
+
 ## Literal substring experiment
 
 `benchmarks/compare_literal.py SOURCE_DATA NEW_EXPERIMENT_DIRECTORY` copies the

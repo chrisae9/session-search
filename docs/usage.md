@@ -1,14 +1,26 @@
-# Development usage
+# Usage reference
 
-These commands operate on an isolated development store. They do not migrate the legacy skill. Run `uv sync --group dev --extra server --extra mcp --extra embeddings` first; examples below use the installed executable.
+New here? Start with the [synthetic quickstart](quickstart.md), then use this page
+for configuration and operating details. Examples below assume an installed
+executable and do not migrate legacy skill data. Choose the optional dependencies
+for your mode; [contributor setup](../CONTRIBUTING.md#development-setup-and-checks)
+installs the extras used by the test suite.
+
+- **Capture and connect:** [Local history](#local-capture-and-search), [MCP](#agent-interface), [HTTP clients](#http-server-and-client), [embeddings](#embeddings).
+- **Install and operate:** [Client maintenance](#client-maintenance), [offline installation](#offline-installation-verification), [recovery](#recovery-development), [offline inference](#offline-local-inference).
+- **Optional optimizations:** [Literal index](#optional-literal-index), [metadata index](#optional-search-metadata-index), [incremental capture](#optional-incremental-capture).
 
 ## Local capture and search
 
+This section captures **your own history**. Select its source explicitly and keep
+the destination outside the checkout. Replace the example paths before running:
+
 ```sh
-.venv/bin/session-search --data-dir demo-state/local init
-.venv/bin/session-search --data-dir demo-state/local capture --producer workstation
-.venv/bin/session-search --data-dir demo-state/local search 'backup restore'
-.venv/bin/session-search --data-dir demo-state/local status
+.venv/bin/session-search --data-dir /absolute/path/search-store init
+.venv/bin/session-search --data-dir /absolute/path/search-store capture \
+  --codex-home /absolute/path/codex-home --producer workstation
+.venv/bin/session-search --data-dir /absolute/path/search-store search 'backup restore'
+.venv/bin/session-search --data-dir /absolute/path/search-store status
 ```
 
 Capture defaults to the configured Codex home; `--codex-home` selects a different source. It reads completed JSONL records, preserves a partial tail for a later scan, and never deletes history when a source file disappears. Ownership metadata and response records are scanned in separate passes so ignored raw payloads do not accumulate in memory. Changed files are still reparsed; unchanged files are skipped.

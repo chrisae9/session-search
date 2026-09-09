@@ -2,23 +2,39 @@
 
 Find useful evidence from past coding sessions through your agent.
 
-**Under development.** Local and remote capture, cited retrieval, CLI/MCP, authenticated search failover, shared raw storage, and scheduled client sync are implemented and running in a pilot deployment. Historical import and exact backup restoration have been exercised. Reviewed thin-client offload is implemented and tested with synthetic files; live cleanup remains disabled. Broader client and local-inference qualification and release clearance remain unfinished. Backups and retention are operator-owned; replica and Restic integrations are optional.
+Ask “Why did we change request handling?” and retrieve the recorded decision, with
+a citation you can expand into its original conversation:
 
-- [Architecture and diagrams](docs/architecture-rendered.md)
-- [Editable Mermaid source](docs/architecture.md)
-- [Backup ownership](docs/backup-ownership.md)
-- [Reliability contract](docs/reliability.md)
-- [Implementation progress](docs/implementation.md)
-- [Development usage](docs/usage.md)
+> We prevent duplicate requests by storing a unique request token before executing
+> the operation. Repeated tokens return the saved result instead of running again.
 
-Python 3.11 or later is required. The core package has no third-party runtime dependencies; server, MCP, and inference dependencies are optional.
+**[Try the five-minute synthetic quickstart](docs/quickstart.md).** It captures only
+the included fictional conversation, searches it, and expands its citation.
+No personal history, server, or embedding model is needed.
 
-```sh
-uv sync --group dev --extra server --extra mcp --extra embeddings
-uv run pytest
-uv run session-search --help
-```
+Your agent uses three read-only MCP tools: **search**, **context**, and **status**.
+The CLI handles capture and administration. Use an isolated local store or connect
+lightweight clients to an authenticated service. Keyword search works without a
+model; semantic search is optional and models are provisioned explicitly.
 
-After installation, the `session-search` executable runs without a package-manager or network bootstrap. Embedding model files are provisioned explicitly. Keyword search does not require a model.
+| I want to… | Start here |
+| --- | --- |
+| Try capture, search, and citations | [Synthetic quickstart](docs/quickstart.md) |
+| Connect my agent | [MCP and skill setup](docs/usage.md#agent-interface) |
+| Configure my own history or models | [Usage guide](docs/usage.md) |
+| Run a shared service or scheduled capture | [Operations](deploy/README.md) |
+| Understand the design and guarantees | [Architecture](docs/architecture-rendered.md) · [Reliability](docs/reliability.md) |
+| Change the code | [Contributing](CONTRIBUTING.md) |
+| Evaluate search quality | [Synthetic benchmark](benchmarks/README.md) · [Findings and limitations](docs/retrieval-evaluation.md) |
 
-New application code is licensed under Apache-2.0. Publication remains gated on [provenance clearance](docs/provenance.md) for reused parser components and dependency distribution review.
+Python 3.11+ is required. The core package has no third-party runtime dependencies;
+server, MCP, and inference packages are optional. See the [documentation index](docs/README.md)
+for recovery, storage, and advanced configuration.
+
+**Development status:** implemented features run in a pilot deployment; broader
+qualification remains unfinished. See [implementation status](docs/implementation.md)
+for the distinction. Backups and retention are operator-owned; replica, Restic,
+and offload workflows are optional.
+
+New application code is Apache-2.0. Public distribution remains pending
+[provenance clearance](docs/provenance.md) for reused parser components and dependency review.
