@@ -66,6 +66,26 @@ def evaluate_vectors(catalog, cases, provider):
     return summarize(rows)
 
 
+def keyword_regressions(report, baseline):
+    """Protect previously retrieved cases; aggregate gains cannot hide a lost case."""
+    if baseline.get('version') != 1 or baseline['dataset_sha256'] != report['dataset_sha256']:
+        raise ValueError('keyword baseline dataset/version mismatch')
+    expected = baseline['ranks']
+    rows = report['keyword']['cases']
+    if len(rows) != len(expected) or {row['case'] for row in rows} != set(expected):
+        raise ValueError('keyword baseline case IDs mismatch')
+    if not any(rank is not None for rank in expected.values()):
+        raise ValueError('keyword baseline must protect at least one retrieved case')
+    failures = []
+    for row in rows:
+        before, after = expected[row['case']], row['rank']
+        if before is not None and (type(before) is not int or not 1 <= before <= 10):
+            raise ValueError('invalid keyword baseline rank')
+        if row['mode'] != 'keyword' or (before is not None and (after is None or after > before)):
+            failures.append({'case': row['case'], 'expected_max_rank': before, 'actual_rank': after})
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-dir', type=Path, required=True, help='new isolated benchmark catalog')
@@ -73,6 +93,7 @@ def main():
     parser.add_argument('--cases', type=Path, default=Path(__file__).with_name('retrieval-cases.json'))
     parser.add_argument('--embedding-config', type=Path)
     parser.add_argument('--allow-remote-embeddings', action='store_true')
+    parser.add_argument('--baseline', type=Path, help='reviewed keyword rank regression baseline')
     args = parser.parse_args()
     if args.data_dir.exists() or args.output.exists():
         raise ValueError('benchmark catalog and output must not already exist')
@@ -105,6 +126,9 @@ def main():
             result['vector'] = evaluate_vectors(catalog, cases, provider)
             if any(row['mode'] != 'hybrid' for row in result['hybrid']['cases']):
                 raise RuntimeError('hybrid benchmark fell back; do not report it as model quality')
+    failures = keyword_regressions(result, json.loads(args.baseline.read_text())) if args.baseline else []
+    if args.baseline:
+        result['regression'] = {'status': 'failed' if failures else 'passed', 'failures': failures}
     args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with args.output.open('x') as output:
         args.output.chmod(0o600)
@@ -112,6 +136,9 @@ def main():
         output.write('\n')
     print(json.dumps({key: {k: v for k, v in result[key].items() if k != 'cases'}
                       for key in ('keyword', 'hybrid', 'vector') if key in result}))
+
+    if failures:
+        raise SystemExit(f'keyword retrieval regressed on {len(failures)} cases; see JSON report')
 
 
 if __name__ == '__main__':

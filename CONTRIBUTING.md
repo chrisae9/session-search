@@ -22,8 +22,23 @@ files are provisioned separately. Preserve optional dependency boundaries: core
 capture and keyword search must remain usable without server, MCP, or model packages.
 
 [CI](.github/workflows/tests.yml) runs Linux and macOS with Python 3.11 and 3.14,
-plus synthetic evaluation and offline core/MCP installation checks. Use targeted
-tests while developing, then run the relevant full checks before submitting changes.
+with real Restic backup/restore, offline core/MCP installation, workflow lint,
+launchd syntax, and executable local scheduler commands. The synthetic keyword
+[regression gate](benchmarks/README.md#ci-regression-gate) saves per-case reports
+as run artifacts.
+
+Run [qualification](.github/workflows/qualification.yml) manually from Actions
+before a release or after transport/native-runtime changes. Its Linux job uses a
+real loopback SSH server and rsync to verify replication, updates, and retained
+citations, and validates systemd unit syntax. Its macOS job builds the native
+runtime, downloads a pinned public model, and checks inference and MCP with OS
+networking denied, including timeout fallback and recovery.
+
+Qualification uses disposable runners and fictional sessions. It does not test
+cross-device connectivity, Tailscale configuration, real scheduler activation,
+or Linux native inference. The native checks establish operation, not retrieval
+quality on a representative corpus. Use targeted tests while developing, then
+run the relevant full checks before submitting changes.
 
 ## Where to work
 

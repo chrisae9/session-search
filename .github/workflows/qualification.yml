@@ -1,0 +1,90 @@
+name: qualification
+on: workflow_dispatch
+permissions:
+  contents: read
+concurrency:
+  group: qualification-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ssh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: python -m pip install uv==0.12.7
+      - run: uv sync --locked
+      - run: sudo apt-get update && sudo apt-get install -y openssh-server rsync
+      - name: Provision disposable loopback receiver
+        run: |
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/host-key"
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/client-key"
+          cat > "$RUNNER_TEMP/sshd.conf" <<EOF
+          Port 22222
+          ListenAddress 127.0.0.1
+          HostKey $RUNNER_TEMP/host-key
+          PidFile $RUNNER_TEMP/sshd.pid
+          AuthorizedKeysFile $RUNNER_TEMP/client-key.pub
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          UsePAM no
+          AllowUsers $USER
+          EOF
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '[127.0.0.1]:22222 %s\n' "$(cat "$RUNNER_TEMP/host-key.pub")" > "$RUNNER_TEMP/known-hosts"
+          cat >> "$HOME/.ssh/config" <<EOF
+          Host session-search-ci
+            HostName 127.0.0.1
+            Port 22222
+            User $USER
+            IdentityFile $RUNNER_TEMP/client-key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $RUNNER_TEMP/known-hosts
+          EOF
+          sudo mkdir -p /run/sshd
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/sshd.conf"
+          ssh -o BatchMode=yes session-search-ci true
+      - name: Validate systemd templates
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -s "$PWD/.venv/bin/session-search" "$HOME/.local/bin/session-search"
+          systemd-analyze --user verify deploy/systemd/*.service deploy/systemd/*.timer
+      - name: Qualify snapshot transfer and immutable citations
+        run: uv run --no-sync python tests/check_ssh_replication.py session-search-ci "$RUNNER_TEMP/ssh-qualification"
+      - name: Stop disposable receiver
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/sshd.pid"; then sudo kill "$(cat "$RUNNER_TEMP/sshd.pid")"; fi
+  native:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: python -m pip install uv==0.12.7
+      - name: Build native inference runtime
+        env:
+          CMAKE_ARGS: -DGGML_METAL=ON
+        run: uv sync --locked --extra local --extra mcp
+      - name: Download checksum-pinned public model
+        env:
+          MODEL_URL: https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf
+        run: |
+          curl --fail --location --retry 3 "$MODEL_URL" --output "$RUNNER_TEMP/model.gguf"
+          echo '06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439  '"$RUNNER_TEMP/model.gguf" | shasum -a 256 -c -
+      - name: Qualify native retrieval with OS networking denied
+        run: |
+          sandbox-exec -p '(version 1)(allow default)(deny network*)' .venv/bin/python tests/check_local_inference.py "$RUNNER_TEMP/model.gguf" 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
+      - name: Qualify native MCP worker with OS networking denied
+        run: |
+          sandbox-exec -p '(version 1)(allow default)(deny network*)' .venv/bin/python tests/check_local_mcp.py "$RUNNER_TEMP/model.gguf" 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439 --short-timeout

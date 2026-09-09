@@ -29,11 +29,17 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install restic
       - run: uv sync --locked --group dev --extra server --extra mcp --extra embeddings
+      - name: Validate workflows
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Validate launchd templates
+        if: runner.os == 'macOS'
+        run: plutil -lint deploy/launchd/*.plist
       - run: uv run --no-sync ruff check src tests benchmarks
       - run: uv run --no-sync pytest -q
       - run: uv build
-      - name: Exercise synthetic keyword evaluation
-        run: uv run --no-sync python benchmarks/evaluate_retrieval.py --data-dir "$RUNNER_TEMP/session-search-benchmark" --output "$RUNNER_TEMP/session-search-benchmark.json"
+      - name: Check keyword retrieval regressions
+        run: uv run --no-sync python benchmarks/evaluate_retrieval.py --data-dir "$RUNNER_TEMP/session-search-benchmark" --output "$RUNNER_TEMP/session-search-benchmark.json" --baseline benchmarks/keyword-baseline.json
       - name: Verify offline core wheel installation
         run: python tests/check_offline_wheel.py dist
       - name: Prepare pinned MCP dependency wheels
@@ -42,3 +48,11 @@ jobs:
           python -m pip download --only-binary=:all: --require-hashes -r "$RUNNER_TEMP/mcp-requirements.txt" --dest "$RUNNER_TEMP/mcp-wheelhouse"
       - name: Verify offline MCP installation and stdio operation
         run: python tests/check_offline_mcp.py dist "$RUNNER_TEMP/mcp-wheelhouse"
+      - name: Retain retrieval report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retrieval-${{ matrix.os }}-${{ matrix.python }}
+          path: ${{ runner.temp }}/session-search-benchmark.json
+          retention-days: 14
+          if-no-files-found: warn

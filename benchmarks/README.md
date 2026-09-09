@@ -9,6 +9,19 @@ The runner refuses existing data/output paths, captures the dataset digest and m
 Use the same dataset digest when comparing runs. The catalog has only 50 sessions, so latency is not representative of a production corpus. These checks complement whole-corpus latency tests and private relevance evaluations; they do not establish either. Keep machine-specific measurements and private evaluation sets outside the repository.
 
 
+## CI regression gate
+
+CI passes `--baseline benchmarks/keyword-baseline.json` and retains the JSON
+report for 14 days, including ranking failures. Each previously retrieved case
+must remain at its recorded rank or better; improvements on other cases cannot
+hide a regression. Empty results therefore fail the gate.
+
+The initial baseline retrieves 20 of 50 cases (recall@10 of 0.40). It records
+existing behavior, not an acceptable quality target. Cases currently missed may
+improve freely. Dataset changes or intentional ranking tradeoffs require reviewing
+the case-level results and updating the baseline explicitly; CI never regenerates
+it automatically. This gate does not assess semantic retrieval quality.
+
 ## Capture append evaluation
 
 `compare_capture.py` compares the incremental parser engine with an independent
