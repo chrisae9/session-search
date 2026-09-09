@@ -76,7 +76,7 @@ This checklist records delivered behavior, separately from the target architectu
 - [ ] Additional native-runtime platforms and whole-corpus quality/performance qualification.
 - [x] Reproducible synthetic retrieval benchmark with dataset/model identity and explicit fallback detection.
 - [x] Read-only fusion-policy comparison and separate conceptual/identifier regression cases; see [retrieval evaluation](retrieval-evaluation.md).
-- [ ] Provenance clearance and public release (not authorized).
+- [ ] Confirm parser permissions, review dependencies, and audit history before public release.
 
 Legacy storage remains separate from the imported Session Search catalog. Offload tests use synthetic files and temporary backup repositories; no real session removal has been performed. Remote raw transfers are opt-in, chunked, and checksum-verified before revision acknowledgement. Thin-client offload uses fresh server-side recovery verification; live rollout remains gated on full independent backup coverage.
 

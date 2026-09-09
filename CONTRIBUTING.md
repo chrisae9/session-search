@@ -49,4 +49,4 @@ tests while developing, then run the relevant full checks before submitting chan
 
 New application code is Apache-2.0. The [provenance record](docs/provenance.md)
 describes the unresolved parser permissions and dependency review required before
-public distribution. Presentation changes do not resolve that release boundary.
+public distribution.

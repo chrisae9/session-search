@@ -59,7 +59,7 @@ may omit or retain from another thread. The response reports
 `exclude_sessions` filters still apply. Never pin one conversation's ID in shared
 server configuration.
 
-For Codex, register the installed executable as a stdio server. For a local-only
+For Codex, [register the installed executable as a stdio server](https://learn.chatgpt.com/docs/extend/mcp?surface=cli). For a local-only
 store:
 
 ```sh
