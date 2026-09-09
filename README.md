@@ -1,6 +1,6 @@
 # Session Search
 
-![Capture and retrieval: Codex session files are captured into a local catalog; an agent searches and expands cited evidence through MCP.](docs/overview.svg)
+![Session Search architecture: data capture, MCP retrieval, optional remote embeddings, and verified replication to a read-only search replica.](docs/overview.svg)
 
 A personal project for searching previous Codex conversations through MCP.
 It captures session history in the background and returns excerpts with citations

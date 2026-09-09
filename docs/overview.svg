@@ -1,44 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="280" viewBox="0 0 1040 280" role="img" aria-labelledby="title desc">
-  <title id="title">Session Search — capture and retrieval</title>
-  <desc id="desc">Background capture reads Codex session files into a SQLite catalog with optional embeddings. A coding agent queries the catalog through the search, context, and status MCP tools. Results carry citations to immutable conversation revisions.</desc>
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker>
-  </defs>
-  <rect width="1040" height="280" rx="16" fill="#111827"/>
-  <g font-family="system-ui, -apple-system, Segoe UI, sans-serif">
-    <text x="32" y="39" font-size="15" font-weight="600" fill="#e2e8f0">CAPTURE AND RETRIEVAL</text>
-    <text x="32" y="65" font-size="13" fill="#94a3b8">Background ingestion</text>
-    <text x="812" y="65" font-size="13" fill="#94a3b8">Agent requests</text>
-    <g fill="#1e293b" stroke="#475569">
-      <rect x="32" y="96" width="164" height="90" rx="10"/>
-      <rect x="235" y="96" width="164" height="90" rx="10"/>
-      <rect x="438" y="96" width="164" height="90" rx="10" stroke="#5eead4"/>
-      <rect x="641" y="96" width="164" height="90" rx="10"/>
-      <rect x="844" y="96" width="164" height="90" rx="10"/>
-    </g>
-    <g stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)">
-      <path d="M 198 141 H 227"/>
-      <path d="M 401 141 H 430"/>
-      <path d="M 639 141 H 610"/>
-      <path d="M 842 141 H 813"/>
-    </g>
-    <g text-anchor="middle" font-size="16" font-weight="600" fill="#f1f5f9">
-      <text x="114" y="130">Codex sessions</text>
-      <text x="317" y="130">Capture</text>
-      <text x="520" y="130">Catalog</text>
-      <text x="723" y="130">MCP</text>
-      <text x="926" y="130">Coding agent</text>
-    </g>
-    <g text-anchor="middle" font-size="12" fill="#cbd5e1">
-      <text x="114" y="156">JSONL files</text>
-      <text x="317" y="156">Scheduled sync</text>
-      <text x="520" y="153">SQLite + optional</text>
-      <text x="520" y="171">embeddings</text>
-      <text x="723" y="153">search · context</text>
-      <text x="723" y="171">status</text>
-      <text x="926" y="156">Retrieval skill</text>
-    </g>
-    <path d="M 520 193 V 222 H 926 V 194" fill="none" stroke="#5eead4" stroke-width="1.5" stroke-dasharray="4 4"/>
-    <text x="723" y="252" text-anchor="middle" font-size="13" fill="#5eead4">Excerpts and citations to recorded revisions</text>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="570" viewBox="0 0 1120 570" role="img" aria-labelledby="title desc">
+<title id="title">Session Search — capture, remote embeddings, and replication</title>
+<desc id="desc">Codex session files and historical imports feed capture and a durable upload queue. Capture writes to a local catalog or uploads to a primary service. The catalog stores canonical evidence and optional raw archives. Coding agents search and expand citations through MCP. Optional local embeddings or a remote embedding server support semantic indexing and queries. A primary can publish verified search snapshots to an optional read-only replica, which can serve search failover. The replica does not accept writes and is not a complete raw-file backup.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#94a3b8"/></marker><marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#5eead4"/></marker></defs>
+<rect width="1120" height="570" rx="16" fill="#111827"/>
+<g font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<text x="32" y="39" font-size="16" font-weight="600" fill="#f1f5f9">SESSION SEARCH</text>
+<text x="32" y="64" font-size="13" fill="#94a3b8">Capture, retrieval, and optional services</text>
+<g fill="#1e293b" stroke="#475569">
+<rect x="32" y="116" width="190" height="112" rx="10"/>
+<rect x="277" y="116" width="190" height="112" rx="10"/>
+<rect x="522" y="116" width="242" height="112" rx="10" stroke="#5eead4"/>
+<rect x="864" y="116" width="224" height="112" rx="10"/>
+<rect x="32" y="333" width="435" height="132" rx="10" stroke-dasharray="5 4"/>
+<rect x="522" y="333" width="242" height="132" rx="10" stroke-dasharray="5 4"/>
+<rect x="864" y="333" width="224" height="132" rx="10"/>
+</g>
+<g fill="none" stroke="#94a3b8" stroke-width="1.7" marker-end="url(#arrow)">
+<path d="M224 172 H269"/><path d="M469 172 H514"/>
+<path d="M862 172 H772"/>
+<path d="M976 331 V236"/>
+</g>
+<g fill="none" stroke="#5eead4" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#teal)">
+<path d="M565 230 V277 H249 V325"/>
+<path d="M700 230 V325"/>
+<path d="M910 230 V277 H804 V398 H772"/>
+<path d="M520 423 H475"/>
+</g>
+<g fill="#f1f5f9" text-anchor="middle" font-size="17" font-weight="600">
+<text x="127" y="147">Data sources</text>
+<text x="372" y="147">Capture</text>
+<text x="643" y="147">Local catalog / primary</text>
+<text x="976" y="147">MCP interface</text>
+<text x="249" y="371">Embedding provider</text>
+<text x="643" y="371">Read-only replica</text>
+<text x="976" y="371">Coding agent</text>
+</g>
+<g fill="#cbd5e1" text-anchor="middle" font-size="13">
+<text x="127" y="173">Codex session files</text><text x="127" y="195">Historical imports</text>
+<text x="372" y="173">Scheduled ingestion</text><text x="372" y="195">Durable queue for uploads</text>
+<text x="643" y="173">Canonical evidence · SQLite</text><text x="643" y="195">Optional raw archives</text>
+<text x="976" y="173">search · context · status</text><text x="976" y="195">Excerpts + immutable citations</text>
+<text x="249" y="397">Local model or remote embedding server</text><text x="249" y="420">Indexing and query embeddings</text><text x="249" y="442">Explicit model identity and configuration</text>
+<text x="643" y="397">Verified search snapshots</text><text x="643" y="420">Evidence + compatible vectors</text><text x="643" y="442">No writes or automatic promotion</text>
+<text x="976" y="397">Retrieval skill</text><text x="976" y="420">Project, session, role, time filters</text>
+</g>
+<g fill="#94a3b8" font-size="12">
+<text x="280" y="252">Local writes or authenticated uploads</text>
+<text x="778" y="156">Queries</text>
+<text x="989" y="289">Tool calls</text>
+</g>
+<g fill="#5eead4" font-size="12">
+<text x="46" y="353">OPTIONAL</text><text x="536" y="353">OPTIONAL</text>
+<text x="291" y="268">Semantic indexing + queries</text>
+<text x="711" y="267">Replication</text>
+<text x="815" y="309">Search failover</text>
+</g>
+<path d="M32 495 H1088" stroke="#334155"/>
+<text x="32" y="522" fill="#94a3b8" font-size="13">Keyword search works without embeddings. Local mode needs no server.</text>
+<text x="32" y="545" fill="#94a3b8" font-size="13">The search replica supports availability; complete raw-file recovery uses separately configured backups.</text>
+</g></svg>
