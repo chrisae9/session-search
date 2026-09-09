@@ -1,55 +1,70 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="530" viewBox="0 0 1200 530" role="img" aria-labelledby="title desc">
-<title id="title">How an agent retrieves earlier conversations</title>
-<desc id="desc">Read left to right: a coding agent asks through MCP, the search engine finds matching evidence in stored history, and that history comes from captured Codex sessions or historical imports. Excerpts and immutable citations return to the agent. Optional local or remote embeddings support semantic search. In a shared deployment, verified search snapshots replicate from the primary to a read-only replica for search failover.</desc>
-<defs>
-<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#94a3b8"/></marker>
-<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#5eead4"/></marker>
-</defs>
-<rect width="1200" height="530" rx="16" fill="#111827"/>
-<g font-family="system-ui, -apple-system, Segoe UI, sans-serif">
-<text x="32" y="38" font-size="18" font-weight="600" fill="#f1f5f9">How an agent retrieves earlier conversations</text>
-<text x="32" y="65" font-size="13" fill="#94a3b8">The request, the search process, and the history behind the result</text>
-<g fill="#94a3b8" font-size="12" font-weight="600">
-<text x="32" y="104">1  ASK</text><text x="258" y="104">2  CALL TOOLS</text><text x="484" y="104">3  FIND EVIDENCE</text><text x="710" y="104">4  READ HISTORY</text><text x="936" y="104">5  SOURCE</text>
-</g>
-<g fill="#1e293b" stroke="#475569">
-<rect x="32" y="120" width="196" height="116" rx="10"/>
-<rect x="258" y="120" width="196" height="116" rx="10"/>
-<rect x="484" y="120" width="196" height="116" rx="10" stroke="#5eead4"/>
-<rect x="710" y="120" width="196" height="116" rx="10"/>
-<rect x="936" y="120" width="232" height="116" rx="10"/>
-</g>
-<g fill="none" stroke="#94a3b8" stroke-width="1.7" marker-end="url(#arrow)">
-<path d="M230 177 H250"/><path d="M456 177 H476"/><path d="M682 177 H702"/>
-<path d="M934 177 H914"/>
-</g>
-<g text-anchor="middle" fill="#f1f5f9" font-size="17" font-weight="600">
-<text x="130" y="151">Coding agent</text><text x="356" y="151">MCP</text><text x="582" y="151">Search engine</text><text x="808" y="151">Stored history</text><text x="1052" y="151">Session sources</text>
-</g>
-<g text-anchor="middle" fill="#cbd5e1" font-size="13">
-<text x="130" y="179">“What did we decide</text><text x="130" y="199">about retries?”</text><text x="130" y="220">Retrieval skill</text>
-<text x="356" y="180">search · context · status</text><text x="356" y="205">Read-only agent tools</text>
-<text x="582" y="179">Keyword + optional semantic</text><text x="582" y="200">Project, role, time filters</text><text x="582" y="221">Local or shared service</text>
-<text x="808" y="179">SQLite + recorded revisions</text><text x="808" y="200">Evidence and vectors</text><text x="808" y="221">Optional raw archives</text>
-<text x="1052" y="179">Codex files · historical imports</text><text x="1052" y="200">Background capture</text><text x="1052" y="221">Queued uploads in shared mode</text>
-</g>
-<path d="M808 242 V277 H130 V242" fill="none" stroke="#5eead4" stroke-width="1.7" marker-end="url(#teal)"/>
-<text x="469" y="269" text-anchor="middle" font-size="13" fill="#5eead4">Matching excerpts + citations back to the recorded conversation</text>
-<text x="1038" y="265" text-anchor="middle" font-size="12" fill="#94a3b8">Captured into the store</text>
-<g fill="#1e293b" stroke="#475569" stroke-dasharray="5 4">
-<rect x="32" y="350" width="548" height="136" rx="10"/>
-<rect x="604" y="350" width="564" height="136" rx="10"/>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" role="img" aria-labelledby="title desc">
+  <title id="title">Session Search architecture</title>
+  <desc id="desc">A coding agent searches earlier conversations through MCP and receives excerpts with immutable citations. Session Search queries its SQLite history and index. Codex session files and historical imports are captured locally or uploaded by clients. An optional local model or remote embedding server embeds evidence and queries. In a shared deployment, the primary publishes verified evidence and vector snapshots to an optional read-only search replica for failover.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#63738a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+    <marker id="accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1 1 L9 5 L1 9" fill="none" stroke="#5069b0" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="1" y="1" width="1118" height="618" rx="18" fill="#f8fafc" stroke="#e2e8f0"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="40" y="47" font-size="15" font-weight="700" letter-spacing="1.3" fill="#63738a">SESSION SEARCH</text>
+    <text x="40" y="86" font-size="27" font-weight="600" fill="#17243a">Agent retrieval, capture, and replication</text>
 
-<g fill="#5eead4" font-size="12" font-weight="600">
-<text x="50" y="374">SEARCH ENGINE · OPTIONAL EMBEDDINGS</text><text x="622" y="374">STORED HISTORY · OPTIONAL REPLICATION</text>
-</g>
-<g fill="#f1f5f9" font-size="17" font-weight="600">
-<text x="50" y="402">Local model or remote embedding server</text><text x="622" y="402">Primary and read-only search replica</text>
-</g>
-<g fill="#cbd5e1" font-size="13">
-<text x="50" y="427">Embeds captured evidence and incoming search queries.</text><text x="50" y="450">The engine compares compatible vectors; keyword search</text><text x="50" y="470">continues when embeddings are unavailable.</text>
-<text x="622" y="427">Verified snapshots replicate evidence and compatible vectors.</text><text x="622" y="450">The MCP client can retry eligible failures against the replica.</text><text x="622" y="470">No replica writes or promotion; raw-file backups are separate.</text>
-</g>
-<text x="32" y="514" font-size="12" fill="#94a3b8">Local capture and keyword retrieval require neither an embedding server nor a replica.</text>
-</g></svg>
+    <!-- One foreground interaction. -->
+    <rect x="40" y="212" width="212" height="144" rx="12" fill="#fff" stroke="#cbd5e1"/>
+    <g transform="translate(60 235)" fill="none" stroke="#5069b0" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="30" height="25" rx="4"/><path d="M7 8 l5 5 -5 5 M17 18 h6"/>
+    </g>
+    <text x="60" y="289" font-size="21" font-weight="600" fill="#17243a">Coding agent</text>
+    <text x="60" y="316" font-size="15" fill="#63738a">Searches earlier sessions</text>
+    <text x="60" y="337" font-size="15" fill="#63738a">and checks cited evidence</text>
+
+    <rect x="414" y="187" width="302" height="196" rx="12" fill="#fff" stroke="#5069b0" stroke-width="1.6"/>
+    <text x="438" y="220" font-size="21" font-weight="600" fill="#17243a">Session Search</text>
+    <text x="438" y="248" font-size="15" fill="#63738a">search · context · status</text>
+    <path d="M438 267 H692" stroke="#e2e8f0"/>
+    <g transform="translate(438 290)" fill="none" stroke="#5069b0" stroke-width="1.6">
+      <ellipse cx="15" cy="5" rx="14" ry="5"/><path d="M1 5 v28 c0 7 28 7 28 0 V5 M1 20 c0 7 28 7 28 0"/>
+    </g>
+    <text x="484" y="306" font-size="17" fill="#17243a">History + search index</text>
+    <text x="484" y="330" font-size="14" fill="#63738a">SQLite · recorded revisions</text>
+    <text x="438" y="362" font-size="13" fill="#63738a">Local process or authenticated primary service</text>
+
+    <path d="M260 260 H405" fill="none" stroke="#5069b0" stroke-width="2" marker-end="url(#accent)"/>
+    <text x="332" y="248" text-anchor="middle" font-size="14" font-weight="600" fill="#5069b0">Search via MCP</text>
+    <path d="M405 310 H260" fill="none" stroke="#63738a" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="332" y="336" text-anchor="middle" font-size="13" fill="#63738a">Excerpts + citations</text>
+
+    <!-- Sources are the origin of the evidence, on the far right. -->
+    <rect x="856" y="142" width="224" height="133" rx="12" fill="#fff" stroke="#cbd5e1"/>
+    <g transform="translate(876 161)" fill="none" stroke="#63738a" stroke-width="1.6" stroke-linejoin="round">
+      <path d="M3 0 h18 l7 7 v22 H3z M21 0 v7 h7 M9 14 h13 M9 20 h13"/>
+    </g>
+    <text x="876" y="218" font-size="19" font-weight="600" fill="#17243a">Session sources</text>
+    <text x="876" y="242" font-size="14" fill="#63738a">Codex files · historical imports</text>
+    <path d="M848 228 H725" fill="none" stroke="#63738a" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="786" y="201" text-anchor="middle" font-size="13" fill="#63738a">Background capture</text>
+    <text x="786" y="218" text-anchor="middle" font-size="13" fill="#63738a">or queued upload</text>
+
+    <!-- Optional services extend the central engine. -->
+    <rect x="414" y="467" width="302" height="114" rx="12" fill="#eef2fa" stroke="#cbd5e1"/>
+    <text x="438" y="491" font-size="11" font-weight="700" letter-spacing="1" fill="#5069b0">OPTIONAL</text>
+    <text x="438" y="518" font-size="19" font-weight="600" fill="#17243a">Remote embedding server</text>
+    <text x="438" y="542" font-size="14" fill="#63738a">Evidence and query embeddings</text>
+    <text x="438" y="562" font-size="13" fill="#63738a">A local model can serve the same role.</text>
+    <path d="M565 391 V459" fill="none" stroke="#63738a" stroke-width="1.6" stroke-dasharray="5 4" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="582" y="429" font-size="13" fill="#63738a">Semantic search</text>
+
+    <rect x="856" y="395" width="224" height="135" rx="12" fill="#eef2fa" stroke="#cbd5e1"/>
+    <text x="876" y="421" font-size="11" font-weight="700" letter-spacing="1" fill="#5069b0">OPTIONAL</text>
+    <text x="876" y="449" font-size="19" font-weight="600" fill="#17243a">Read-only replica</text>
+    <text x="876" y="475" font-size="14" fill="#63738a">Evidence + compatible vectors</text>
+    <text x="876" y="498" font-size="14" fill="#63738a">Search failover for MCP clients</text>
+    <path d="M724 344 H789 Q799 344 799 354 V450 Q799 460 809 460 H848" fill="none" stroke="#63738a" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+    <text x="862" y="347" font-size="13" fill="#63738a">Verified replication</text>
+    <text x="862" y="366" font-size="13" fill="#63738a">from the primary</text>
+
+    <text x="40" y="545" font-size="13" fill="#63738a">Keyword retrieval works independently</text>
+    <text x="40" y="565" font-size="13" fill="#63738a">of embeddings and replication.</text>
+  </g>
+</svg>
