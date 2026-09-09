@@ -21,6 +21,6 @@ combined history. This syncs searchable evidence, not native Codex session lists
 | [Setup](docs/agent-install.md) | Installation and background capture, carried out by an agent |
 | [Development](CONTRIBUTING.md) | Code layout and checks |
 
-Development version · Python 3.11+ · Apache-2.0
+Development version · macOS / Linux · Python 3.11+ · Apache-2.0
 
 [Implementation status](docs/implementation.md) · [Documentation](docs/README.md) · [Provenance](docs/provenance.md)

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.session-search.local-sync</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/absolute/bin/session-search</string>
+    <string>--data-dir</string><string>/absolute/local/data</string>
+    <string>sync</string>
+    <string>--codex-home</string><string>/absolute/codex/home</string>
+    <string>--producer</string><string>unique-device-id</string>
+    <string>--max-bytes</string><string>8589934592</string>
+    <string>--reserve-bytes</string><string>2147483648</string>
+  </array>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>Nice</key><integer>10</integer>
+  <key>Umask</key><integer>63</integer>
+</dict>
+</plist>

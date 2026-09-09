@@ -1,0 +1,9 @@
+[Unit]
+Description=Capture Codex history into the local Session Search catalog
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/session-search-v1/local-sync.env
+ExecStart=%h/.local/bin/session-search --data-dir ${SESSION_SEARCH_DATA} sync --codex-home ${SESSION_SEARCH_CODEX_HOME} --producer ${SESSION_SEARCH_PRODUCER} --max-bytes ${SESSION_SEARCH_CAPTURE_BYTES} --reserve-bytes ${SESSION_SEARCH_RESERVE_BYTES}
+Nice=10
+UMask=0077

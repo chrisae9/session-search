@@ -8,6 +8,11 @@ mode and existing machine conventions.
 
 ## Inspect before changing anything
 
+Supported runtime platforms are macOS and Linux with Python 3.11+. Native Windows
+is not supported: the runtime uses Unix-only file locking. A Linux environment
+such as WSL is a separate deployment; verify its source access and user service
+manager rather than assuming native Windows paths or scheduling work there.
+
 Identify the operating system, Python and uv availability, actual Codex home,
 existing Session Search commands, MCP registration, skill, catalog, and scheduled
 jobs. Resolve paths from this machine; do not copy another installation's paths.
@@ -29,6 +34,23 @@ Python 3.11+ and uv. From the checkout:
 ```sh
 uv sync --locked --no-dev --extra mcp
 ```
+
+Select extras for the role being installed. Append the listed flags to
+`uv sync --locked --no-dev`; the first row is the default above.
+
+| Role | Extra flags | Additional configuration |
+| --- | --- | --- |
+| Local keyword retrieval through MCP | `--extra mcp` | Codex source and catalog |
+| Local retrieval with a local embedding model | `--extra mcp --extra local` | Native inference runtime and explicitly provisioned model |
+| Local retrieval using a remote embedding server | `--extra mcp --extra embeddings` | Provider configuration and explicit remote-embedding opt-in |
+| MCP client of a shared search service | `--extra mcp` | Primary endpoint and device token; models run on the data host |
+| Shared keyword search server | `--extra server` | Device registry and authenticated service configuration |
+| Shared server with semantic search | `--extra server --extra local` or `--extra server --extra embeddings` | Local model or explicitly configured remote provider |
+
+Combine extras when one installation serves multiple roles. The `local` extra
+includes NumPy; installing it does not provision a model. Follow
+[local inference preparation](usage.md#offline-local-inference) for native runtime
+requirements and [provider configuration](usage.md#embeddings) for either mode.
 
 The installed executable is `.venv/bin/session-search` inside that checkout.
 Resolve its absolute path for MCP and scheduler configuration; those processes
@@ -68,9 +90,10 @@ indexer and MCP process; local mode must not enable remote fallback.
 
 After a successful sync, configure a user-level launchd job on macOS or a systemd
 user service and timer on Linux to run that same bounded sync command roughly
-every five minutes. Adapt the [scheduler templates](../deploy/README.md#recurring-capture)
-to the selected mode. The existing client templates include remote and raw-archive
-options: omit those options for the local keyword baseline. Use absolute paths,
+every five minutes. Use the [local capture templates](../deploy/README.md#local-capture)
+for the local baseline; use the [client templates](../deploy/README.md#recurring-capture)
+for shared-service uploads. The client templates opt into raw archival; remove
+`--archive-raw` and `--chunk-raw` unless raw retention was requested. Use absolute paths,
 private log locations, and one scheduler per installation. Preserve unrelated jobs.
 Validate and load the configuration, run it through the scheduler, and verify its
 exit status and fresh `local_capture_sync` receipt.
@@ -83,7 +106,7 @@ installation session. Keep keyword retrieval available while it finishes. Report
 partial semantic coverage and timeout fallback honestly. Do not infer completion
 from a running process or an available model.
 
-On other operating systems or without a usable user service manager, report that
+Without a usable user service manager on a supported platform, report that
 automatic refresh is not configured rather than claiming the setup is complete.
 User jobs run only when their host service manager is available; sleep and logout
 can delay refresh.
@@ -108,6 +131,18 @@ An independent MCP check does not reload an already-running agent connection.
 If the host needs a reconnect or restart, state that remaining action without
 interrupting the user's running work. Report the installed revision, selected mode,
 verified coverage, scheduler state, and anything still pending.
+
+### Installation completion checklist
+
+Report each item as verified, pending, or not requested:
+
+- MCP: fresh saved connection responds; any host reconnect is identified.
+- Skill: one installed retrieval skill is discoverable by the agent host.
+- Capture: scheduled job succeeds and its receipt is recent.
+- Retrieval: captured evidence is searchable and its citation expands correctly.
+- Embeddings: requested provider works; full coverage or remaining backlog is stated separately.
+
+Do not label a pending item complete based only on configuration files existing.
 
 ## Update or roll back
 

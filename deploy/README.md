@@ -66,6 +66,46 @@ Fresh offload verification is opt-in on the primary: `serve --offload-repositori
 One subprocess performs fresh restores at a time, with a 2 GiB free-space reserve checked before each restore. Results are device-owned, expire after 15 minutes, and are capped at 32 retained jobs. Interrupted work cannot produce a successful proof; retry with a new nonce. The admission lock is inherited by Restic so a surviving restore still blocks another job if its worker exits. Job-owned restore scratch is reclaimed after that lock is released; ownership markers remain until cleanup finishes, so interrupted cleanup can be retried safely. Use the [manual client offload workflow](../docs/offload.md) to review a plan and apply it with fresh verification and final native-file checks. A verification result is not an offline deletion permit.
 
 
+## Local capture
+
+For a standalone catalog on macOS or Linux, use these templates. They capture
+normalized evidence locally, with no upload endpoint or raw archival enabled.
+They also work when a separate embedding job indexes the local catalog; capture
+itself does not need embedding configuration.
+
+| Platform | Templates |
+| --- | --- |
+| macOS | [Local launchd job](launchd/session-search-local-sync.plist) |
+| Linux | [Local service](systemd/session-search-local-sync.service) and [timer](systemd/session-search-local-sync.timer) |
+
+Resolve the executable, source, and data paths and choose a stable producer ID.
+Set capture and reserve budgets for the available space and largest source file.
+Run the exact bounded sync command once and inspect its receipt before scheduling.
+Use one capture job per catalog; replace an existing job rather than enabling
+both the local and upload templates against the same store.
+
+On macOS, customize the plist and place it under the user's `Library/LaunchAgents`.
+Validate with `plutil -lint` and load it into the user's GUI domain with
+`launchctl bootstrap`. It runs at load and every five minutes while loaded.
+
+On Linux, install the service and timer under the user's systemd unit directory.
+Make the executable available as `~/.local/bin/session-search` and create a private
+`~/.config/session-search-v1/local-sync.env`:
+
+```text
+SESSION_SEARCH_DATA=/absolute/local/data
+SESSION_SEARCH_CODEX_HOME=/absolute/codex/home
+SESSION_SEARCH_PRODUCER=unique-device-id
+SESSION_SEARCH_CAPTURE_BYTES=8589934592
+SESSION_SEARCH_RESERVE_BYTES=2147483648
+```
+
+Reload the user service manager, start `session-search-local-sync.service`, and
+verify its successful result before enabling `session-search-local-sync.timer`.
+The timer waits five minutes after completion. Inspect `local_capture_sync` through
+MCP afterward; a loaded job alone does not prove capture succeeded. Configure
+private log destinations if needed; leave transcript contents out of diagnostics.
+
 ## Recurring capture
 
 `sync` runs one capture cycle under a nonblocking process lock. Remote mode flushes

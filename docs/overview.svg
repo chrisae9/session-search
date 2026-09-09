@@ -41,7 +41,7 @@
       <rect width="26" height="19" rx="2"/><path d="M-3 24 h32"/>
       <rect x="40" width="26" height="19" rx="2"/><path d="M37 24 h32"/>
     </g>
-    <text x="954" y="173" font-size="13" fill="#63738a">Multiple devices</text>
+    <text x="954" y="173" font-size="13" fill="#63738a">Shared mode</text>
     <text x="876" y="218" font-size="19" font-weight="600" fill="#17243a">Session sync</text>
     <text x="876" y="242" font-size="14" fill="#63738a">Codex sessions on each device</text>
     <text x="876" y="266" font-size="13" fill="#63738a">Per-device capture + upload queue</text>
