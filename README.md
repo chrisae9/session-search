@@ -1,6 +1,6 @@
 # Session Search
 
-![Session Search architecture: data capture, MCP retrieval, optional remote embeddings, and verified replication to a read-only search replica.](docs/overview.svg)
+![An agent request passes through MCP and the search engine to stored conversation history, captured from session sources. Optional embeddings and replication support retrieval.](docs/overview.svg)
 
 A personal project for searching previous Codex conversations through MCP.
 It captures session history in the background and returns excerpts with citations
