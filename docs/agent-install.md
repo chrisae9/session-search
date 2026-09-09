@@ -25,6 +25,9 @@ no model or network service. If the user requests semantic search, inspect exist
 model configuration and follow [embedding setup](usage.md#embeddings). Provision
 models explicitly and keep their files outside the repository. Remote history or
 embedding services require the user's intended destination and configuration.
+Keep remote services behind Tailscale or an equivalent private network, with HTTPS
+and application authentication. Do not configure public internet exposure as part
+of installation.
 
 ## Install the runtime and retrieval skill
 

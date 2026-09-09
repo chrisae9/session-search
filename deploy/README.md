@@ -1,5 +1,11 @@
 # Data-host services
 
+Remote deployment assumes a private network such as Tailscale. Keep the API and
+any remote embedding endpoint off the public internet. Restrict access to intended
+devices with network policy, retain HTTPS and application authentication, and keep
+the Session Search service bound to loopback behind the private HTTPS proxy.
+Joining the private network alone does not authorize access to session history.
+
 The `systemd/session-search-server.service` user unit runs the authenticated API on loopback. Install it under the user's systemd unit directory, expose the selected release as `~/.local/bin/session-search`, and provide a private `~/.config/session-search-v1/server.env`:
 
 ```text

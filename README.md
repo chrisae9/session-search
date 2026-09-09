@@ -14,6 +14,10 @@ session, role, and time. It runs locally or as an authenticated shared service. 
 captures its own sessions and queues uploads to one primary; agents search the
 combined history. This syncs searchable evidence, not native Codex session lists.
 
+For remote use, keep the service behind Tailscale or an equivalent private
+network; do not expose it directly to the public internet. Private networking
+does not replace HTTPS or Session Search device authentication.
+
 | Reference | Contents |
 | --- | --- |
 | [Architecture](docs/architecture-rendered.md) | Capture, storage, retrieval, and service boundaries |
