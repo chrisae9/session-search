@@ -34,8 +34,14 @@ def capacity(path: Path, incoming_bytes: int, reserve_bytes: int = DEFAULT_RESER
 
 
 def run_command(arguments: list[str]) -> str:
+    environment = os.environ.copy()
+    if arguments[0] == 'rsync':
+        # Remote paths are already shell-quoted below. Keep that contract on both
+        # older rsync and 3.2.4+, which otherwise escapes the quotes themselves.
+        environment.update(RSYNC_OLD_ARGS='1', RSYNC_PROTECT_ARGS='0')
     try:
-        result = subprocess.run(arguments, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(arguments, capture_output=True, text=True, timeout=300,
+                                env=environment)
     except (OSError, subprocess.TimeoutExpired):
         raise RuntimeError('replication transport unavailable; snapshot retained') from None
     if result.returncode:
