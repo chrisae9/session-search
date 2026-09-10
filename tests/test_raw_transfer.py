@@ -45,10 +45,9 @@ transfers.append('device', key, 0, len(data), data)
     other, _ = transfers.paths('other', key)
     other.write_bytes(data[:10])
     assert partial.read_bytes() == data
-    lock_inode = lock.stat().st_ino
     assert transfers.status('device', key) == {'version': 1, 'status': 'complete', 'offset': len(data)}
     assert not partial.exists()
-    assert lock.stat().st_ino == lock_inode
+    assert not lock.exists()
     assert other.read_bytes() == data[:10]
     assert transfers.objects.verify(key)
     assert transfers.status('device', key)['status'] == 'complete'
@@ -383,7 +382,6 @@ def test_disappearing_partial_retries_without_losing_queued_raw(
     transfers = RawTransfers(root, chunked=chunk_raw)
     transfers.append('device', key, 0, len(original), original[:10])
     partial, lock = transfers.paths('device', key)
-    lock_inode = lock.stat().st_ino
     removed = False
 
     def request(endpoint, route, payload, *, method=None):
@@ -419,7 +417,7 @@ def test_disappearing_partial_retries_without_losing_queued_raw(
         assert queue.status()['pending'] == 0
         assert queue.db.execute('SELECT COUNT(*) FROM raw_acknowledgements').fetchone()[0] == 1
     assert source.read_bytes() == original
-    assert lock.stat().st_ino == lock_inode
+    assert not lock.exists()
     assert b''.join(ObjectStore(root).iter_bytes(key)) == original
     with Catalog(root, readonly=True) as catalog:
         result = catalog.search(SearchQuery('recover interrupted transfer', literal=True))

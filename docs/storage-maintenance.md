@@ -12,8 +12,8 @@ dual-restore checks described in [offload](offload.md).
 | --- | --- |
 | Client upload chunks and recipes | `flush` validates every pending upload under capture and flush locks, then removes unreferenced staging objects. Conflicted and rejected uploads remain roots. Recognized private chunk-write temporaries are also reclaimed; invalid state defers cleanup. |
 | Client queue database free pages | `compact-client` compacts an idle, drained queue when scratch capacity is sufficient. It retains acknowledgements and capture checkpoints. |
-| Completed server upload staging | Successful append/finalization removes that producer's partial file. Append and status retries can finish interrupted cleanup after verifying the completed object. Status cleanup takes the writer lease and a nonblocking per-transfer lock; busy or fenced stores retain the duplicate. Other producers' staging and the stable lock file remain intact. |
-| Expired upload partials | Explicit `expire-transfers --apply` removes eligible managed partials after writer exclusion and identity rechecks. Dry run is the default; published objects, raw recovery references, and stable lock files are retained. |
+| Completed server upload staging | Successful append/finalization removes that producer's partial file. Append and status retries can finish interrupted cleanup after verifying the completed object. Status cleanup takes the writer lease and a nonblocking per-transfer lock; busy or fenced stores retain the duplicate. Other producers' staging remains intact. The transfer lock is retired after its partial disappears; waiters recheck inode identity before proceeding. |
+| Expired upload partials | Explicit `expire-transfers --apply` removes eligible managed partials after writer exclusion and identity rechecks. Dry run is the default; published objects and raw recovery references are retained. Locks belonging to expired partials are retired too. |
 | Replica generations | Activation and `prune-replica` retain current, previous, and actively pinned generations. Reader process exit releases its pin. Other staging directories are outside this cleanup. |
 | Recovery snapshot outbox | One pending snapshot is retried until every required destination is restore-verified. The complete receipt is saved before retiring staging; a later cycle can finish interrupted retirement using that receipt. |
 | Verification jobs | Admission is serialized, with at most 32 managed job records. Completed records expire after 900 seconds; subsequent new-job admission performs cleanup. Worker-owned scratch is reclaimed only after its ownership checks pass. Expiry is not a periodic deletion timer. |
@@ -27,7 +27,7 @@ and growing history can legitimately require more space.
 | State | Current behavior |
 | --- | --- |
 | Server upload capacity | Manual partial expiry is available below; optional shared staging admission is available below. No automatic expiry timer is implemented. |
-| Server transfer lock files | Persist after transfers. Do not unlink them while readers or writers can hold open descriptors: a new file at the same path would create a different lock and break mutual exclusion. |
+| Server transfer lock files | Missing-transfer status requests create no files. Completion retires its lock; interrupted cleanup or older versions can leave orphan locks. Manual expiry removes old, empty, managed orphan locks after writer exclusion and identity checks. |
 | Server or local archive chunk temporaries | Ordinary exception cleanup removes them, but a killed process can leave `.chunk-*` files. The client-only cleanup above must not be applied to a canonical catalog. No server sweep is implemented. |
 | Interrupted backup snapshot construction | `.snapshot-*` staging defers the next cycle for operator inspection. It is not automatically deleted or treated as a completed backup. |
 | Completed backup receipts | Retained per snapshot; no receipt retention policy is implemented. A saved receipt records earlier verification, not present repository availability. |
@@ -73,8 +73,9 @@ finalize without allocating more upload bytes even after the budget is lowered.
 
 If partial uploads fill the budget, they can stall one another before completion.
 Review and raise the budget or use the explicit expiry workflow below; the server
-does not discard pending bytes to make room. Retained lock files may eventually
-require a larger scan limit. The scan runs per appended chunk, so raising its
+does not discard pending bytes to make room. For lock files left by older versions
+or process crashes, use manual expiry. Its initial scan may need a larger explicit
+limit if an existing backlog exceeds the default. The scan runs per appended chunk, so raising its
 limit can increase upload latency. No hard scan deadline is promised.
 
 This cap covers upload partials only. Canonical history, archive chunk conversion,
@@ -82,6 +83,12 @@ lock-file disk allocation, local capture, backups, and unrelated processes still
 need filesystem capacity. It is not a reservation of free space. Keep the capacity
 lock inode intact, and do not mix configured writers with older or unconfigured
 upload writers on the same primary.
+
+Before upgrading from a version that retained transfer locks permanently, stop
+all server and upload processes sharing the primary data directory, then restart
+them on the new version. Do not overlap old writers with lock retirement: older
+writers do not recheck a lock inode after waiting. Client queues retain pending
+uploads across the restart.
 
 ## Manual transfer expiry
 
@@ -95,7 +102,7 @@ session-search --data-dir PRIMARY_DATA expire-transfers --older-than-days 7 --ap
 Choose the age explicitly; at least one day must be retained. Age is measured
 from the partial's last write, not its last status lookup. An idle client may
 need to retransmit expired staging from its durable queue. This policy applies
-only to recognized raw and normalized upload partial names, not native sessions,
+to recognized raw and normalized upload partial names and old empty orphan locks, not native sessions,
 canonical evidence, chunk objects, completed transfer objects, or backup receipts.
 
 The command takes the primary writer lock exclusively and without waiting;
@@ -110,7 +117,9 @@ maximum 1,000,000, including lock and unrecognized files). Otherwise the run
 defers before deleting anything; an operator can review a larger explicit limit.
 Raw recovery references are streamed once from the catalog; the directory-entry
 limit does not bound that read or establish a wall-clock deadline.
-The result reports eligible, removed, and skipped counts and byte totals.
+The result reports eligible, removed, and skipped partial counts and byte totals,
+plus `eligible_locks` and `removed_locks`. Orphan locks use their own modification
+time for the age cutoff; locks attached to expired partials are removed with them.
 Removals are synced individually, and an interrupted run can be repeated.
 No production expiry or scheduling is implied by the synthetic tests.
 

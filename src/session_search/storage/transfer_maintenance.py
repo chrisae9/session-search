@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 PART = re.compile(r'[0-9a-f]{64}-[0-9a-f]{64}\.part')
+LOCK = re.compile(r'[0-9a-f]{64}-[0-9a-f]{64}\.lock')
 DIRECTORIES = ('transfers', 'revision-transfers')
 
 
@@ -30,7 +31,7 @@ def expire_transfers(root: Path, *, older_than_days: float, apply: bool = False,
         raise PermissionError('transfer expiry requires an unfenced primary')
     result = {'version': 1, 'status': 'planned', 'scanned_entries': 0,
               'eligible_files': 0, 'eligible_bytes': 0, 'removed_files': 0,
-              'removed_bytes': 0, 'skipped_files': 0}
+              'removed_bytes': 0, 'skipped_files': 0, 'eligible_locks': 0, 'removed_locks': 0}
     cutoff = time.time() - older_than_days * 86400
     with ExitStack() as stack:
         # Exclude cooperating capture, ingestion, and append writers for the
@@ -50,6 +51,7 @@ def expire_transfers(root: Path, *, older_than_days: float, apply: bool = False,
         from session_search.storage.chunks import ChunkStore
         catalog = stack.enter_context(Catalog(root, readonly=True))
         candidates = []
+        orphan_locks = []
         for directory in DIRECTORIES:
             try:
                 directory_fd = os.open(root / directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -62,6 +64,17 @@ def expire_transfers(root: Path, *, older_than_days: float, apply: bool = False,
                         return {**result, 'status': 'deferred', 'reason': 'scan_limit',
                                 'eligible_files': 0, 'eligible_bytes': 0}
                     result['scanned_entries'] += 1
+                    if LOCK.fullmatch(entry.name):
+                        try:
+                            info = entry.stat(follow_symlinks=False)
+                        except FileNotFoundError:
+                            continue
+                        partial = root / directory / (entry.name[:-5] + '.part')
+                        if (stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                                and info.st_size == 0 and info.st_mtime < cutoff
+                                and not partial.exists() and not partial.is_symlink()):
+                            orphan_locks.append((directory_fd, entry.name, info))
+                        continue
                     if not PART.fullmatch(entry.name):
                         continue
                     info = entry.stat(follow_symlinks=False)
@@ -108,6 +121,7 @@ def expire_transfers(root: Path, *, older_than_days: float, apply: bool = False,
                         != (observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns)):
                     result['skipped_files'] += 1
                     continue
+                result['eligible_locks'] += 1
                 result['eligible_files'] += 1
                 result['eligible_bytes'] += current.st_size
                 if apply:
@@ -115,7 +129,39 @@ def expire_transfers(root: Path, *, older_than_days: float, apply: bool = False,
                     os.fsync(directory_fd)
                     result['removed_files'] += 1
                     result['removed_bytes'] += current.st_size
+                    os.unlink(lock_name, dir_fd=directory_fd)
+                    os.fsync(directory_fd)
+                    result['removed_locks'] += 1
             finally:
                 os.close(lock_fd)
+        # Writers are excluded by the global lease. Status readers may retire
+        # an orphan too; verify its inode after locking before removing it.
+        for directory_fd, name, observed in orphan_locks:
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory_fd)
+            except FileNotFoundError:
+                continue
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                try:
+                    current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if (not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                        or current.st_size != 0
+                        or (current.st_dev, current.st_ino, current.st_mtime_ns) != (
+                            observed.st_dev, observed.st_ino, observed.st_mtime_ns)):
+                    continue
+                result['eligible_locks'] += 1
+                if apply:
+                    os.unlink(name, dir_fd=directory_fd)
+                    os.fsync(directory_fd)
+                    result['removed_locks'] += 1
+            finally:
+                os.close(fd)
     result['status'] = 'pruned' if apply else 'planned'
     return result

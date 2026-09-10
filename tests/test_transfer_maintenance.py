@@ -25,11 +25,10 @@ def initialize(root):
         pass
 
 
-def test_expiry_is_opt_in_preserves_locks_and_unmanaged_history(tmp_path):
+def test_expiry_is_opt_in_retires_locks_and_preserves_unmanaged_history(tmp_path):
     initialize(tmp_path)
     partial, lock = staged(tmp_path)
     normalized, normalized_lock = staged(tmp_path, 'revision-upload')
-    inode = lock.stat().st_ino
     fresh, _ = staged(tmp_path, producer='fresh')
     os.utime(fresh, None)
     unmanaged = partial.parent / 'keep.part'
@@ -43,7 +42,7 @@ def test_expiry_is_opt_in_preserves_locks_and_unmanaged_history(tmp_path):
     result = expire_transfers(tmp_path, older_than_days=7, apply=True)
     assert result['removed_files'] == 2 and result['removed_bytes'] == 10
     assert not partial.exists() and not normalized.exists()
-    assert lock.stat().st_ino == inode and normalized_lock.exists()
+    assert not lock.exists() and not normalized_lock.exists()
     assert fresh.exists() and unmanaged.exists() and native.read_bytes() == b'preserve native'
     assert (tmp_path / 'catalog.sqlite3').read_bytes() == before
     assert expire_transfers(tmp_path, older_than_days=7, apply=True)['removed_files'] == 0
@@ -158,7 +157,7 @@ expire_transfers(Path(sys.argv[1]), older_than_days=7, apply=True)
     assert result.returncode == 73
     assert sum(p.exists() for p in (first, second)) == 1
     assert expire_transfers(tmp_path, older_than_days=7, apply=True)['removed_files'] == 1
-    assert first_lock.exists() and second_lock.exists()
+    assert sum(p.exists() for p in (first_lock, second_lock)) == 1
     assert (tmp_path / 'catalog.sqlite3').read_bytes() == before
 
 
@@ -187,3 +186,23 @@ def test_cli_plan_and_apply(tmp_path):
     applied = subprocess.run([*command, '--apply'], check=True, capture_output=True,
                              text=True, timeout=5)
     assert json.loads(applied.stdout)['removed_files'] == 1 and not partial.exists()
+
+
+def test_expiry_removes_only_old_managed_orphan_locks(tmp_path):
+    initialize(tmp_path)
+    transfer = RawTransfers(tmp_path)
+    _, old = transfer.paths('device', 'a' * 64)
+    old.touch()
+    os.utime(old, (time.time() - 10 * 86400,) * 2)
+    _, fresh = transfer.paths('device', 'b' * 64)
+    fresh.touch()
+    foreign = old.parent / 'foreign.lock'
+    foreign.touch()
+    partial, live = staged(tmp_path)
+    os.utime(partial, None)
+    os.utime(live, (time.time() - 10 * 86400,) * 2)
+    plan = expire_transfers(tmp_path, older_than_days=7)
+    assert plan['eligible_locks'] == 1 and old.exists()
+    result = expire_transfers(tmp_path, older_than_days=7, apply=True)
+    assert result['removed_locks'] == 1 and not old.exists()
+    assert fresh.exists() and foreign.exists() and partial.exists() and live.exists()

@@ -4,12 +4,50 @@ import fcntl
 import hashlib
 import os
 import shutil
+import stat
+from contextlib import contextmanager
 from pathlib import Path
 
 from session_search.core.records import digest
 from session_search.storage.objects import ObjectStore, sync_directory
 
 MAX_CHUNK = 1024 * 1024
+
+
+@contextmanager
+def transfer_lock(partial: Path, lock: Path, *, create: bool = True, blocking: bool = True):
+    """Retry retired inodes: a waiter must never write through an unlinked lock."""
+    while True:
+        try:
+            fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+                         | (os.O_CREAT if create else 0), 0o600)
+        except FileNotFoundError:
+            if create:
+                raise
+            yield False
+            return
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError('invalid transfer lock')
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            held = os.fstat(fd)
+            try:
+                current = lock.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
+                continue
+            try:
+                yield True
+            finally:
+                # Keep locks for resumable partials. Retire completed, rejected,
+                # and status-only locks while still holding the checked inode.
+                if not partial.exists() and not partial.is_symlink():
+                    lock.unlink()
+                    sync_directory(lock.parent)
+            return
+        finally:
+            os.close(fd)
 
 
 class OffsetConflict(ValueError):
@@ -31,9 +69,10 @@ class RawTransfers:
         self.staging = root / ("transfers" if namespace == "raw" else "revision-transfers")
         self.max_size = max_size
 
-    def paths(self, producer: str, key: str):
+    def paths(self, producer: str, key: str, *, create: bool = True):
         self.objects.path(key)  # Reject path traversal before forming any path.
-        self.staging.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if create:
+            self.staging.mkdir(parents=True, exist_ok=True, mode=0o700)
         stem = digest(producer.encode()) + "-" + key
         return self.staging / (stem + ".part"), self.staging / (stem + ".lock")
 
@@ -64,10 +103,7 @@ class RawTransfers:
         try:
             with writer_lease(self.root):
                 _, lock = self.paths(producer, key)
-                with lock.open('a') as guard:
-                    # A status retry need not wait for an active append to retire
-                    # its own partial. Never unlink the stable lock inode.
-                    fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with transfer_lock(partial, lock, blocking=False):
                     completed = self._completed_path(key)
                     if completed is None or not self.objects.verify(key):
                         raise ValueError('completed object changed before staging cleanup')
@@ -86,11 +122,12 @@ class RawTransfers:
             self._sync_completed(completed)
             self._reclaim_completed_partial(producer, key)
             return {"version": 1, "status": "complete", "offset": self.objects.size(key)}
-        partial, lock = self.paths(producer, key)
-        with lock.open("a") as guard:
-            fcntl.flock(guard, fcntl.LOCK_SH)
+        partial, lock = self.paths(producer, key, create=False)
+        with transfer_lock(partial, lock, create=False) as acquired:
+            # An absent lock means no writer had started at this observation.
+            # Returning zero is safe: a racing append rejects stale offsets.
             return {"version": 1, "status": "pending",
-                    "offset": partial.stat().st_size if partial.exists() else 0}
+                    "offset": partial.stat().st_size if acquired and partial.exists() else 0}
 
     def append(self, producer: str, key: str, offset: int, total: int, chunk: bytes) -> dict:
         from session_search.storage.fencing import writer_lease
@@ -103,8 +140,7 @@ class RawTransfers:
         if offset + len(chunk) > total or (not chunk and offset != total):
             raise ValueError("chunk exceeds declared file size")
         partial, lock = self.paths(producer, key)
-        with lock.open("a") as guard:
-            fcntl.flock(guard, fcntl.LOCK_EX)
+        with transfer_lock(partial, lock):
             completed = self._completed_path(key)
             if completed is not None:
                 if not self.objects.verify(key) or self.objects.size(key) != total:

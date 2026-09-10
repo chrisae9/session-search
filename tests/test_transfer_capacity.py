@@ -210,3 +210,66 @@ def test_capacity_recovery_preserves_client_queue_and_exact_raw(tmp_path):
         result = catalog.search(SearchQuery('capacity retry preserves history', literal=True))
         assert result['results']
         assert catalog.context([result['results'][0]['citation']])['status'] == 'ok'
+
+
+@pytest.mark.parametrize('namespace', ['raw', 'revision-upload'])
+def test_absent_status_and_completed_churn_do_not_exhaust_admission(tmp_path, namespace):
+    transfer = RawTransfers(tmp_path, namespace=namespace, max_staging_bytes=32, staging_scan_limit=2)
+    for i in range(12):
+        data = f'synthetic-{i}'.encode()
+        key = hashlib.sha256(data).hexdigest()
+        assert transfer.status('device', key)['offset'] == 0
+    assert not transfer.staging.exists()
+    for i in range(12):
+        data = f'synthetic-{i}'.encode()
+        key = hashlib.sha256(data).hexdigest()
+        assert transfer.append('device', key, 0, len(data), data)['status'] == 'complete'
+    assert list(transfer.staging.iterdir()) == []
+
+
+def test_waiter_retries_retired_lock_inode(tmp_path):
+    import select
+    from session_search.storage.transfers import transfer_lock
+
+    transfer = RawTransfers(tmp_path)
+    key = hashlib.sha256(b'x').hexdigest()
+    partial, lock = transfer.paths('device', key)
+    script = '''
+import fcntl, sys
+from pathlib import Path
+from session_search.storage.transfers import RawTransfers
+original = fcntl.flock
+first = True
+def controlled(fd, operation):
+    global first
+    if operation == fcntl.LOCK_EX and first:
+        first = False
+        print('opened', flush=True)
+        original(fd, operation)
+        print('retired-acquired', flush=True)
+        sys.stdin.readline()
+    else:
+        original(fd, operation)
+fcntl.flock = controlled
+result = RawTransfers(Path(sys.argv[1])).append('device', sys.argv[2], 0, 1, b'x')
+print(result['status'], flush=True)
+'''
+    child = None
+    try:
+        with transfer_lock(partial, lock):
+            child = subprocess.Popen([sys.executable, '-c', script, str(tmp_path), key],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            assert child.stdout.readline().strip() == 'opened'
+        assert child.stdout.readline().strip() == 'retired-acquired'
+        with transfer_lock(partial, lock):
+            child.stdin.write('\n')
+            child.stdin.flush()
+            assert not select.select([child.stdout], [], [], 0.2)[0]
+            assert not partial.exists()
+        stdout, _ = child.communicate(timeout=5)
+        assert child.returncode == 0 and stdout.strip() == 'complete'
+        assert transfer.objects.verify(key) and not lock.exists()
+    finally:
+        if child is not None and child.poll() is None:
+            child.kill()
+            child.wait()
