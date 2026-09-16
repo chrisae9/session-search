@@ -23,8 +23,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--primary", help="explicit remote mode: primary HTTPS endpoint")
     result.add_argument("--standby", help="optional read-only search endpoint")
     result.add_argument("--token-file", type=Path, help="device credential file for remote mode")
-    result.add_argument("--read-timeout", type=float, default=10,
-                        help="remote read timeout in seconds (greater than 0, at most 60; default 10)")
+    result.add_argument("--read-timeout", type=float, default=30,
+                        help="remote read timeout in seconds (greater than 0, at most 60; default 30)")
     result.add_argument("--embedding-config", type=Path, help="explicit model configuration file")
     result.add_argument("--allow-remote-embeddings", action="store_true",
                         help="explicitly permit the configured remote model endpoint")

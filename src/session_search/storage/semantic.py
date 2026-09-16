@@ -222,7 +222,11 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                 "WHERE c.event_row=a.event_row AND v.content_hash IS NULL)", (provider.identity.key,),
             ).fetchone()[0]
         except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
-            lexical.update(mode="keyword", degraded=True, degradation=type(exc).__name__)
+            lexical.update(mode="keyword", degraded=True, degradation="TimeoutError" if isinstance(exc, TimeoutError) else type(exc).__name__)
+            reason = getattr(exc, 'reason', None)
+            if reason in {'local_inference_busy', 'local_inference_execution_limit',
+                          'local_startup_timeout', 'local_query_timeout'}:
+                lexical['degradation_reason'] = reason
             lexical["more_matches"] = (lexical["more_matches"]
                                        or len(lexical["results"]) > query.limit)
             lexical["results"] = rank_results(query, lexical["results"])[:query.limit]

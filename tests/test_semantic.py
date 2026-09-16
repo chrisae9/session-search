@@ -334,3 +334,39 @@ def test_remote_timeout_configuration_is_explicit_and_validated(tmp_path):
         config.write_text(json.dumps({**value, 'query_timeout': invalid}))
         with pytest.raises(ValueError, match='timeouts'):
             load_provider(config, allow_remote=True)
+
+
+@pytest.mark.parametrize('mode', ['local', 'remote'])
+def test_embedding_timeout_defaults_and_independent_overrides(tmp_path, mode):
+    config = tmp_path / 'embedding.json'
+    value = {'mode': mode, 'model_path': str(tmp_path / 'absent'),
+             'endpoint': 'http://127.0.0.1:1234', 'model': 'test', 'response_model': 'test',
+             'identity': {'artifact': 'test', 'dimensions': 2}}
+    config.write_text(json.dumps(value))
+    provider = load_provider(config, allow_remote=True)
+    outer = 'startup_timeout' if mode == 'local' else 'timeout'
+    assert getattr(provider, outer) == 30 and provider.query_timeout == 10
+    config.write_text(json.dumps({**value, outer: 1, 'query_timeout': 5}))
+    provider = load_provider(config, allow_remote=True)
+    assert getattr(provider, outer) == 1 and provider.query_timeout == 5
+    for field in (outer, 'query_timeout'):
+        for invalid in (0, -1, 61, True, '2', float('nan'), float('inf')):
+            config.write_text(json.dumps({**value, field: invalid}))
+            with pytest.raises(ValueError, match='timeouts'):
+                load_provider(config, allow_remote=True)
+
+
+def test_local_timeout_reason_preserves_fallback_contract(tmp_path):
+    from session_search.core.local_worker import LocalInferenceTimeout
+
+    class Slow(FakeProvider):
+        def embed(self, *args, **kwargs):
+            raise LocalInferenceTimeout('local_startup_timeout')
+
+    with Catalog(tmp_path) as catalog:
+        populate(catalog)
+        index_pending(catalog, FakeProvider())
+        result = hybrid_search(catalog, SearchQuery('recovery'), Slow())
+        assert result['degradation'] == 'TimeoutError'
+        assert result['degradation_reason'] == 'local_startup_timeout'
+        assert result['results']
