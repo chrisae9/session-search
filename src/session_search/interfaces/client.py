@@ -43,7 +43,7 @@ def validate_endpoint(endpoint: str) -> str:
 
 class Client:
     def __init__(self, primary: str, token_file: Path, *, standby: str | None = None,
-                 timeout: float = 10, upload_timeout: float = 60):
+                 timeout: float = 30, upload_timeout: float = 60):
         self.primary = validate_endpoint(primary)
         self.standby = validate_endpoint(standby) if standby else None
         if not 0 < timeout <= 60:

@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 
-from session_search.core.embeddings import EmbeddingIdentity, LocalEmbedder
+from session_search.core.embeddings import EmbeddingIdentity, LocalEmbedder, validate_timeout
 
 
 def _serve(connection, model_path, identity):
@@ -35,11 +35,20 @@ def _serve(connection, model_path, identity):
         connection.close()
 
 
+class LocalInferenceTimeout(TimeoutError):
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(reason.replace('_', ' '))
+
+
 class IsolatedLocalEmbedder:
-    def __init__(self, provider: LocalEmbedder, *, timeout: float = 2):
+    def __init__(self, provider: LocalEmbedder, *, timeout: float | None = None):
         self.identity = provider.identity
         self.model_path = provider.model_path
-        self.timeout = timeout
+        self.timeout = validate_timeout(timeout if timeout is not None else provider.query_timeout)
+        self.startup_timeout = validate_timeout(
+            timeout if timeout is not None else provider.startup_timeout)
+        self.warm = False
         self.lock = threading.Lock()
         self.connection = None
         self.process = None
@@ -65,8 +74,9 @@ class IsolatedLocalEmbedder:
         # Bound the pipe message as well as the number of outstanding requests.
         if len(text.encode('utf-8')) > 32768:
             raise ValueError('local inference request exceeds IPC limit')
-        if not self.lock.acquire(blocking=False):
-            raise TimeoutError('local inference is busy')
+        deadline = time.monotonic() + (self.timeout if self.warm else self.startup_timeout)
+        if not self.lock.acquire(timeout=max(0, deadline - time.monotonic())):
+            raise LocalInferenceTimeout('local_inference_busy')
         try:
             if self.process is None:
                 if not self.model_path.is_file():
@@ -77,23 +87,33 @@ class IsolatedLocalEmbedder:
                 raise OSError('local inference worker exited')
             request = (text, query)
             if self.pending is not None:
-                if not self.connection.poll(0):
-                    if time.monotonic() - self.pending_started > 60:
+                remaining = min(deadline - time.monotonic(),
+                                60 - (time.monotonic() - self.pending_started))
+                if not self.connection.poll(max(0, remaining)):
+                    if time.monotonic() - self.pending_started >= 60:
                         self._stop()
-                        raise TimeoutError('local inference worker exceeded its execution limit')
-                    raise TimeoutError('local inference is busy')
+                        raise LocalInferenceTimeout('local_inference_execution_limit')
+                    raise LocalInferenceTimeout('local_inference_busy')
                 result = self.connection.recv()
                 previous, self.pending = self.pending, None
+                if result[0] == 'ok':
+                    self.warm = True
                 if previous == request:
                     return self._result(result)
+            if time.monotonic() >= deadline:
+                raise LocalInferenceTimeout('local_inference_busy' if self.warm
+                                            else 'local_startup_timeout')
             self.connection.send(request)
             self.pending = request
             self.pending_started = time.monotonic()
-            if not self.connection.poll(self.timeout):
-                raise TimeoutError('local inference deadline exceeded')
+            if not self.connection.poll(max(0, deadline - time.monotonic())):
+                raise LocalInferenceTimeout('local_query_timeout' if self.warm
+                                            else 'local_startup_timeout')
             result = self.connection.recv()
             self.pending = None
-            return self._result(result)
+            vector = self._result(result)
+            self.warm = True
+            return vector
         except (EOFError, BrokenPipeError):
             self._stop()
             raise OSError('local inference worker exited') from None
@@ -118,6 +138,8 @@ class IsolatedLocalEmbedder:
                 self.process.join(timeout=1)
             self.process.close()
         self.connection = self.process = self.pending = None
+        self.pending_started = None
+        self.warm = False
 
     def close(self):
         with self.lock:

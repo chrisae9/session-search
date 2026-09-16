@@ -46,20 +46,23 @@ def validate_vector(vector, dimensions):
     return [value / norm for value in values]
 
 
+def validate_timeout(value):
+    if type(value) not in (int, float) or not 0 < value <= 60:
+        raise ValueError('embedding timeouts must be finite, greater than zero and at most 60 seconds')
+    return value
+
+
 class RemoteEmbedder:
     def __init__(self, endpoint: str, identity: EmbeddingIdentity, *, model: str,
-                 response_model: str, token_file: Path | None = None, timeout: float = 10,
-                 query_timeout: float = 2):
+                 response_model: str, token_file: Path | None = None, timeout: float = 30,
+                 query_timeout: float = 10):
         self.endpoint = validate_endpoint(endpoint)
         self.identity = identity
         self.model = model
         self.response_model = response_model
         self.token_file = token_file
-        if (type(timeout) not in (int, float) or not 0 < timeout <= 60
-                or type(query_timeout) not in (int, float) or not 0 < query_timeout <= 60):
-            raise ValueError('embedding timeouts must be greater than zero and at most 60 seconds')
-        self.timeout = timeout
-        self.query_timeout = min(timeout, query_timeout)
+        self.timeout = validate_timeout(timeout)
+        self.query_timeout = validate_timeout(query_timeout)
         self.opener = urllib.request.build_opener(NoRedirect())
         # Limit this worker to two background requests; foreground requests do
         # not wait on this gate. Deployment-wide scheduling remains a server concern.
@@ -93,8 +96,11 @@ class RemoteEmbedder:
 
 
 class LocalEmbedder:
-    def __init__(self, model_path: Path, identity: EmbeddingIdentity):
+    def __init__(self, model_path: Path, identity: EmbeddingIdentity, *,
+                 startup_timeout: float = 30, query_timeout: float = 10):
         self.identity = identity
+        self.startup_timeout = validate_timeout(startup_timeout)
+        self.query_timeout = validate_timeout(query_timeout)
         self.model_path = model_path
         self.model = None
         self.lock = threading.Lock()
@@ -125,12 +131,14 @@ def load_provider(config_path: Path | None, *, allow_remote: bool = False):
     config = json.loads(config_path.read_text())
     identity = EmbeddingIdentity(**config["identity"])
     if config["mode"] == "local":
-        return LocalEmbedder(Path(config["model_path"]).expanduser(), identity)
+        return LocalEmbedder(Path(config["model_path"]).expanduser(), identity,
+                             startup_timeout=config.get("startup_timeout", 30),
+                             query_timeout=config.get("query_timeout", 10))
     if config["mode"] == "remote" and allow_remote:
         return RemoteEmbedder(
             config["endpoint"], identity, model=config["model"],
             response_model=config["response_model"],
             token_file=Path(config["token_file"]).expanduser() if config.get("token_file") else None,
-            timeout=config.get('timeout', 10), query_timeout=config.get('query_timeout', 2),
+            timeout=config.get('timeout', 30), query_timeout=config.get('query_timeout', 10),
         )
     raise ValueError("remote embeddings require explicit network authorization")

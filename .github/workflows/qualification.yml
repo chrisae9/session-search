@@ -97,4 +97,5 @@ jobs:
           sandbox-exec -p '(version 1)(allow default)(deny network*)' .venv/bin/python tests/check_local_inference.py "$RUNNER_TEMP/model.gguf" 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
       - name: Qualify native MCP worker with OS networking denied
         run: |
+          sandbox-exec -p '(version 1)(allow default)(deny network*)' .venv/bin/python tests/check_local_mcp.py "$RUNNER_TEMP/model.gguf" 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
           sandbox-exec -p '(version 1)(allow default)(deny network*)' .venv/bin/python tests/check_local_mcp.py "$RUNNER_TEMP/model.gguf" 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439 --short-timeout

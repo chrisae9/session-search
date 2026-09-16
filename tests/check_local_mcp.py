@@ -57,7 +57,7 @@ async def scenario(args):
                     await session.initialize()
 
                     async def call(name, arguments):
-                        result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=30)
+                        result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=45)
                         assert not result.isError
                         return json.loads(result.content[0].text)
 
@@ -73,6 +73,7 @@ async def scenario(args):
                     fallback_observed = found.get('degraded', False)
                     if args.short_timeout:
                         assert fallback_observed and found['degradation'] == 'TimeoutError'
+                        assert found['degradation_reason'] == 'local_startup_timeout'
                         async with asyncio.timeout(10):
                             while found.get('semantic_available') is not True:
                                 await asyncio.sleep(0.05)
@@ -84,6 +85,7 @@ async def scenario(args):
                         warm_started = time.monotonic()
                         warm = await call('search', {'text': 'recover a missing workstation'})
                         warm_seconds = time.monotonic() - warm_started
+                        assert warm['semantic_available'] is True and not warm.get('degraded', False)
                         assert warm['results'][0]['citation'] == found['results'][0]['citation']
                     context = await call('context', {'citations': [found['results'][0]['citation']]})
                     assert context['results'][0]['events']

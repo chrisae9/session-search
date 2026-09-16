@@ -111,8 +111,8 @@ In another shell:
 
 `--read-timeout SECONDS` sets the remote socket timeout for search, context, and
 status, including those invoked through `mcp`. Put it before the subcommand.
-The default is 10 seconds; values must be greater than zero and at most 60.
-For example, `--read-timeout 30` allows a measured larger-catalog search to finish
+The default is 30 seconds; values must be greater than zero and at most 60.
+For example, `--read-timeout 45` allows a measured larger-catalog search to finish
 without changing its retrieval mode. Each endpoint gets this allowance, so a
 longer timeout can also delay failover. It is not a total operation deadline and
 does not change upload timeouts, embedding-provider timeouts, or local searches.
@@ -121,7 +121,28 @@ Normalized payloads over 8 MiB automatically use resumable 1 MiB chunks in a sep
 
 ## Embeddings
 
-Use `--embedding-config` to select an explicitly provisioned provider. Configuration contains `mode`, an `identity` object with artifact and dimensions, and either `model_path` for local mode or `endpoint`, `model`, and `response_model` for remote mode. Remote credentials, when needed, use `token_file`. Remote configuration can set `timeout` (default 10 seconds) and `query_timeout` (default 2 seconds), each greater than zero and at most 60 seconds. Interactive embedding requests use the smaller allowance; background indexing retains `timeout`. These are socket I/O timeouts, not a deadline for the full database search. An embedding timeout produces explicit keyword fallback.
+Use `--embedding-config` to select an explicitly provisioned provider. Configuration contains `mode`, an `identity` object with artifact and dimensions, and either `model_path` for local mode or `endpoint`, `model`, and `response_model` for remote mode. Remote credentials, when needed, use `token_file`. Timeout settings are positive numbers up to 60 seconds:
+
+| Mode | Setting | Default | Applies to |
+| --- | --- | --- | --- |
+| Local MCP | `startup_timeout` | 30 seconds | Calls before the worker's first successful inference |
+| Local MCP | `query_timeout` | 10 seconds | Calls after the worker is warm |
+| Remote | `query_timeout` | 10 seconds | Interactive embedding socket I/O |
+| Remote | `timeout` | 30 seconds | Background embedding socket I/O |
+
+Local MCP calls share one budget across waiting for the worker and inference.
+A timed-out inference stays in flight so a retry can reuse its result; no second
+worker is started. A stalled pending inference is terminated when a subsequent
+call observes its 60-second execution limit. Local CLI and HTTP inference run
+synchronously; the local timeout settings apply only to the isolated MCP worker.
+Remote settings are independent socket I/O timeouts, not a full-search deadline.
+The client's `--read-timeout` is separate and should leave room for embedding
+and retrieval on the server.
+
+An embedding timeout returns keyword results with `degraded: true` and
+`degradation: "TimeoutError"`. Local MCP also reports `degradation_reason`:
+`local_startup_timeout`, `local_query_timeout`, `local_inference_busy`, or
+`local_inference_execution_limit`. Literal searches bypass inference.
 
 Local artifacts require `identity.artifact` to equal `sha256:` followed by the model file's SHA-256 digest. Remote embeddings additionally require `--allow-remote-embeddings`; no remote fallback is inferred. Optional local inference dependencies must be installed beforehand.
 
