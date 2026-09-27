@@ -4,14 +4,22 @@ import os
 import asyncio
 from dataclasses import asdict
 from pathlib import Path
+from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
-from session_search.core.output import bounded_response
+from session_search.core.output import MAX_OUTPUT_BUDGET, MIN_OUTPUT_BUDGET, bounded_response
 from session_search.core.records import SearchQuery, canonical_json
 from session_search.interfaces.client import Client
 from session_search.storage.catalog import Catalog
+
+OutputBudget = Annotated[int, Field(
+    ge=MIN_OUTPUT_BUDGET, le=MAX_OUTPUT_BUDGET,
+    description="Maximum UTF-8 bytes of the serialized JSON response, including metadata. "
+                "Inclusive range: 1024–65536 bytes. Omit to use the tool default.",
+)]
 
 
 def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> FastMCP:
@@ -62,8 +70,13 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
                project: str | None = None, session_id: str | None = None,
                producer: str | None = None, include_subagents: bool = False,
                include_current_session: bool = False, exclude_sessions: list[str] | None = None,
-               limit: int = 10, budget: int = 16384, current_session_id: str | None = None) -> str:
-        """Find past evidence. Pass current_session_id for thread exclusion on shared MCP hosts."""
+               limit: int = 10, budget: OutputBudget = 16384,
+               current_session_id: str | None = None) -> str:
+        """Find past evidence. Pass current_session_id for thread exclusion on shared MCP hosts.
+
+        Normally omit budget. It limits serialized JSON output, including metadata, in UTF-8
+        bytes (1024–65536 inclusive; default 16384).
+        """
         exclude = list(exclude_sessions or [])
         current = current_session_id or os.environ.get("CODEX_THREAD_ID")
         if not include_current_session and current:
@@ -76,8 +89,13 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
         return canonical_json(bounded_response(result, budget))
 
     @server.tool(annotations=annotations, structured_output=False)
-    async def context(citations: list[dict], neighbors: int = 2, budget: int = 32768) -> str:
-        """Expand exact cited revisions. Unavailable evidence is never replaced by a newer revision."""
+    async def context(citations: list[dict], neighbors: int = 2,
+                      budget: OutputBudget = 32768) -> str:
+        """Expand exact cited revisions. Unavailable evidence is never replaced by a newer revision.
+
+        Normally omit budget. It limits serialized JSON output, including metadata, in UTF-8
+        bytes (1024–65536 inclusive; default 32768).
+        """
         return canonical_json(bounded_response(await dispatch(invoke, "context", {
             "citations": citations, "neighbors": neighbors}), budget))
 

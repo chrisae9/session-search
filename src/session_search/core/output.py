@@ -4,10 +4,15 @@ from copy import deepcopy
 
 from session_search.core.records import canonical_json
 
+MIN_OUTPUT_BUDGET = 1024
+MAX_OUTPUT_BUDGET = 65536
+
 
 def bounded_response(response: dict, budget: int = 16384) -> dict:
-    if not 1024 <= budget <= 65536:
-        raise ValueError("output budget must be between 1024 and 65536 bytes")
+    if not MIN_OUTPUT_BUDGET <= budget <= MAX_OUTPUT_BUDGET:
+        raise ValueError(
+            f"output budget must be between {MIN_OUTPUT_BUDGET} and {MAX_OUTPUT_BUDGET} bytes"
+        )
     result = deepcopy(response)
     result.update(truncated=False, omitted_results=0, omitted_events=0)
 

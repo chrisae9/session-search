@@ -9,6 +9,10 @@ Use the configured Session Search MCP tools: `search`, `context`, and `status`.
 They are read-only. Codex is the live capture source; historical imports can include
 other coding tools. Search evidence and raw-file backups have separate coverage.
 
+Normally omit `budget` to use the tool default. When a specific output limit is
+needed, use 1,024–65,536 UTF-8 bytes including response metadata; search defaults
+to 16,384 bytes and context to 32,768 bytes.
+
 Search for the subject and intent, omitting generic wording such as “search prior
 sessions” unless Session Search itself is the topic. Use semantic search for ideas
 and patterns. Use `literal: true` for an exact error, identifier, or phrase;

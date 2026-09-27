@@ -152,6 +152,16 @@ Do not label a pending item complete based only on configuration files existing.
 Preserve the prior revision, configuration, and skill before updating. Read release
 and migration notes, update the stable checkout and locked dependencies, then
 repeat capture and fresh MCP verification. Avoid duplicate scheduled jobs.
+
+For MCP tool-contract updates, update the runtime referenced by each agent's MCP
+registration and its installed retrieval skill. A shared server update alone does
+not update client-side tool schemas; registrations may also point to a different
+release than the shell executable. With a fresh connection, inspect `list_tools`:
+search and context budgets must advertise UTF-8 bytes, minimum 1024, maximum
+65536, and defaults 16384 and 32768 respectively. Verify omitted budgets work and
+out-of-range budgets fail before retrieval. Reconnect existing agent sessions when
+convenient so they receive the new descriptions and schemas.
+
 For rollback, stop the new jobs and restore the prior runtime and registration;
 do not delete captured history. Check catalog compatibility before pointing an
 older executable at data changed by a newer version.

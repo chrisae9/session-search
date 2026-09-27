@@ -23,7 +23,7 @@ These are alternative deployment modes. The isolated installation never uploads 
 | `context` | Bounded surrounding evidence for one or more citations, including the matched passage. |
 | `status` | Service health, indexing lag, pending uploads, and durability state. |
 
-The `session-search` CLI handles setup, capture, backup verification, and manual offload. Search output defaults to a 16 KiB total budget; context defaults to 32 KiB. Both cap at 64 KiB and report omissions.
+The `session-search` CLI handles setup, capture, backup verification, and manual offload. Search output defaults to a 16 KiB total budget; context defaults to 32 KiB. Both accept budgets from 1 to 64 KiB (1,024–65,536 UTF-8 bytes), including response metadata, and report omissions. MCP rejects invalid budgets before retrieval.
 
 ## 2. One primary service, optional infrastructure
 
