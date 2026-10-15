@@ -91,7 +91,8 @@ def _validate_raw_options(catalog, archive_raw: bool, chunk_raw: bool) -> None:
 
 def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
                  force: bool = False, chunk_raw: bool = False, incremental: bool = False,
-                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
+                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None,
+                 source: str = "codex") -> dict:
     _validate_raw_options(catalog, archive_raw, chunk_raw)
     if type(reserve_bytes) is not int or reserve_bytes < 0:
         raise ValueError("capture reserve must be a nonnegative byte count")
@@ -101,12 +102,13 @@ def capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bo
     # committed, even when another process finishes uploading the same object.
     with getattr(catalog, "capture_guard", nullcontext)():
         return _capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
-                             chunk_raw=chunk_raw, incremental=incremental, reserve_bytes=reserve_bytes, max_bytes=max_bytes)
+                             chunk_raw=chunk_raw, incremental=incremental, reserve_bytes=reserve_bytes, max_bytes=max_bytes, source=source)
 
 
 def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: bool = False,
                   force: bool = False, chunk_raw: bool = False, incremental: bool = False,
-                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
+                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None,
+                 source: str = "codex") -> dict:
     path = path.resolve()
     before = fingerprint(path)
     if not force and catalog.fingerprint(str(path)) == before:
@@ -129,7 +131,12 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
             return {"status": "changed_during_read", "retryable": True}
         cache = next_checkpoint = None
         parse_work = {"mode": "full", "reused_events": 0}
-        if incremental:
+        if source == "pi":
+            from session_search.capture.parsers.pi import parse_pi
+            session = parse_pi(snapshot)
+        elif source != "codex":
+            raise ValueError("unsupported capture source")
+        elif incremental:
             from session_search.capture.checkpoints import CheckpointCache
             from session_search.capture.incremental import parse_incremental
             cache = CheckpointCache(catalog.root / "parser-checkpoints")
@@ -159,7 +166,8 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
 
 def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bool = False,
                  force: bool = False, chunk_raw: bool = False, incremental: bool = False,
-                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None) -> dict:
+                 reserve_bytes: int = 64 * 1024 * 1024, max_bytes: int | None = None,
+                 source: str = "codex") -> dict:
     _validate_raw_options(catalog, archive_raw, chunk_raw)
     if type(reserve_bytes) is not int or reserve_bytes < 0:
         raise ValueError("capture reserve must be a nonnegative byte count")
@@ -169,12 +177,12 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
     files = {}
     accessible_roots = 0
     errors = []
-    for name in ("archived_sessions", "sessions"):
+    for name in (("sessions",) if source == "pi" else ("archived_sessions", "sessions")):
         directory = home / name
         if directory.exists():
             accessible_roots += 1
             for path in directory.rglob("*.jsonl"):
-                files[_session_id_from_path(path)] = path
+                files[str(path) if source == "pi" else _session_id_from_path(path)] = path
     counts: dict[str, int] = {}
     admitted_bytes = 0
     parser_counts = {"full": 0, "incremental": 0, "reused_events": 0, "checkpoints_saved": 0}
@@ -183,7 +191,7 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
         try:
             attempt_bytes = path.stat().st_size
             result = capture_file(catalog, path, producer, archive_raw=archive_raw, force=force,
-                                  chunk_raw=chunk_raw, incremental=incremental, reserve_bytes=reserve_bytes,
+                                  chunk_raw=chunk_raw, incremental=incremental, reserve_bytes=reserve_bytes, source=source,
                                   max_bytes=None if max_bytes is None else max(0, max_bytes - admitted_bytes))
             if result["status"] not in {"unchanged", "deferred"}:
                 admitted_bytes += result.get("source_bytes", attempt_bytes)
@@ -206,3 +214,35 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
     return {"version": 1, "status": state, "counts": counts, "errors": errors,
             "discovered": len(files), "raw_archival_enabled": archive_raw, "admitted_source_bytes": admitted_bytes,
             "parser": parser_counts}
+
+
+def capture_providers(catalog, home, producer, *, pi_home=None, providers_config=None, **options):
+    from session_search.core.providers import load_providers
+    settings = load_providers(providers_config)
+    # Preserve the existing result shape and behavior for installations without config.
+    if providers_config is None:
+        return capture_home(catalog, home, producer, **options)
+    remaining = options.pop("max_bytes", None)
+    results = {}
+    for source, directory in (("codex", home), ("pi", pi_home or Path.home() / ".pi/agent")):
+        if not settings.get(source, {}).get("capture_enabled", False):
+            results[source] = {"status": "disabled"}
+            continue
+        results[source] = capture_home(catalog, directory, producer, source=source,
+                                       max_bytes=remaining, **options)
+        if remaining is not None:
+            remaining = max(0, remaining - results[source]["admitted_source_bytes"])
+    enabled = [v for v in results.values() if v["status"] != "disabled"]
+    counts = {}
+    parser = {"full": 0, "incremental": 0, "reused_events": 0, "checkpoints_saved": 0}
+    for value in enabled:
+        for key, count in value["counts"].items():
+            counts[key] = counts.get(key, 0) + count
+        for key, count in value["parser"].items():
+            parser[key] += count
+    return {"version": 1, "status": "partial" if any(
+                v["status"] in {"partial", "unavailable"} for v in enabled) else "complete",
+            "counts": counts, "errors": [e for v in enabled for e in v["errors"]],
+            "discovered": sum(v["discovered"] for v in enabled), "parser": parser,
+            "admitted_source_bytes": sum(v["admitted_source_bytes"] for v in enabled),
+            "raw_archival_enabled": options.get("archive_raw", False), "providers": results}

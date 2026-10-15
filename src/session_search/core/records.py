@@ -101,8 +101,18 @@ class SearchQuery:
     exclude_sessions: tuple[str, ...] = field(default_factory=tuple)
     include_subagents: bool = False
     limit: int = 10
+    sources: tuple[str, ...] | None = None
+    all_sources: bool = False
 
     def __post_init__(self):
+        if type(self.all_sources) is not bool:
+            raise ValueError("all_sources must be a boolean")
+        if self.sources is not None:
+            if (not isinstance(self.sources, (tuple, list)) or not 1 <= len(self.sources) <= 32
+                    or any(not isinstance(s, str) or not s or len(s) > 64 for s in self.sources)):
+                raise ValueError("sources must contain 1–32 nonempty source names")
+            if self.all_sources:
+                raise ValueError("sources and all_sources are mutually exclusive")
         if not isinstance(self.text, str) or not self.text.strip() or len(self.text) > 8192:
             raise ValueError("query must contain 1–8192 characters")
         if self.role not in {None, "user", "assistant"}:

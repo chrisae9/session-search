@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from session_search.capture.local import capture_home
+from session_search.capture.local import capture_providers
 from session_search.capture.queue import UploadQueue
 from session_search.core.output import bounded_response
 from session_search.core.records import SearchQuery, canonical_json
@@ -29,6 +29,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--allow-remote-embeddings", action="store_true",
                         help="explicitly permit the configured remote model endpoint")
     commands = result.add_subparsers(dest="command", required=True)
+    result.add_argument("--providers-config", type=Path, help="explicit capture/search provider TOML")
+    commands.add_parser("configure-providers", help="apply search defaults to the local primary catalog")
     commands.add_parser("init", help="create an isolated catalog")
     expiry = commands.add_parser('expire-transfers', help='plan or apply expiry of managed upload partials')
     expiry.add_argument('--older-than-days', type=float, required=True)
@@ -166,6 +168,10 @@ def parser() -> argparse.ArgumentParser:
     sync.add_argument("--flush-limit", type=int, default=100)
     search = commands.add_parser("search", help="retrieve cited evidence")
     search.add_argument("query")
+    search.add_argument("--source", dest="sources", action="append", help="explicit source override")
+    search.add_argument("--all-sources", action="store_true")
+    capture.add_argument("--pi-home", type=Path, help="Pi agent directory containing sessions")
+    sync.add_argument("--pi-home", type=Path, help="Pi agent directory containing sessions")
     search.add_argument("--literal", action="store_true")
     search.add_argument("--role", choices=["user", "assistant"])
     for option in ("after", "before", "project", "session-id", "producer"):
@@ -185,6 +191,17 @@ def parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "configure-providers":
+            from session_search.core.providers import load_providers
+            if args.primary or not args.providers_config:
+                raise ValueError("configure-providers requires a local primary and --providers-config")
+            settings = load_providers(args.providers_config)
+            defaults = {name: value["search_by_default"] for name, value in settings.items()
+                        if "search_by_default" in value}
+            with Catalog(args.data_dir.resolve()) as catalog:
+                catalog.configure_sources(defaults)
+                print(canonical_json({"status": "ok", "source_defaults": catalog.source_defaults()}))
+            return 0
         if args.command == "import-legacy":
             if args.primary or args.standby or args.token_file:
                 raise ValueError("legacy import runs locally on the destination data host")
@@ -376,7 +393,8 @@ def main(argv=None) -> int:
             output = sync_once(args.data_dir, args.codex_home, args.producer, client=client,
                                max_bytes=args.max_bytes, max_pending_bytes=args.max_pending_bytes,
                                reserve_bytes=args.reserve_bytes, archive_raw=args.archive_raw,
-                               chunk_raw=args.chunk_raw, incremental=args.incremental, flush_limit=args.flush_limit)
+                               chunk_raw=args.chunk_raw, incremental=args.incremental, flush_limit=args.flush_limit,
+                               pi_home=args.pi_home, providers_config=args.providers_config)
             print(canonical_json(output))
             return 0
         if args.command == "flush":
@@ -412,7 +430,8 @@ def main(argv=None) -> int:
                 output = {"version": 1, "status": "ok", "coverage": catalog.status(),
                           "local_capture_sync": capture_status(args.data_dir)}
             elif args.command == "capture":
-                output = capture_home(catalog, args.codex_home, args.producer, archive_raw=args.archive_raw,
+                output = capture_providers(catalog, args.codex_home, args.producer,
+                                      pi_home=args.pi_home, providers_config=args.providers_config, archive_raw=args.archive_raw,
                                       force=args.force, chunk_raw=args.chunk_raw, incremental=args.incremental,
                                   max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             elif args.command == "search":
@@ -425,6 +444,7 @@ def main(argv=None) -> int:
                     before=args.before, project=args.project, session_id=args.session_id,
                     producer=args.producer, exclude_sessions=tuple(exclude),
                     include_subagents=args.include_subagents, limit=args.limit,
+                    sources=args.sources, all_sources=args.all_sources,
                 )
                 from session_search.storage.semantic import hybrid_search
                 output = bounded_response(hybrid_search(catalog, query, provider), args.budget)
@@ -453,7 +473,8 @@ def remote_command(args, client: Client) -> dict:
     from dataclasses import asdict
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
-            result = capture_home(queue, args.codex_home, args.producer, archive_raw=args.archive_raw,
+            result = capture_providers(queue, args.codex_home, args.producer,
+                                  pi_home=args.pi_home, providers_config=args.providers_config, archive_raw=args.archive_raw,
                                   force=args.force, chunk_raw=args.chunk_raw, incremental=args.incremental,
                                   max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             result["queue"] = queue.status()
@@ -483,7 +504,7 @@ def remote_command(args, client: Client) -> dict:
         exclude.append(os.environ["CODEX_THREAD_ID"])
     query = SearchQuery(args.query, args.literal, args.role, args.after, args.before,
                         args.project, args.session_id, args.producer, tuple(exclude),
-                        args.include_subagents, args.limit)
+                        args.include_subagents, args.limit, sources=args.sources, all_sources=args.all_sources)
     return bounded_response(with_outage_capture_status(
         client.read("search", {**asdict(query), "budget": args.budget}), args.data_dir), args.budget)
 

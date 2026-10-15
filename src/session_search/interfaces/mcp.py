@@ -71,7 +71,8 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
                producer: str | None = None, include_subagents: bool = False,
                include_current_session: bool = False, exclude_sessions: list[str] | None = None,
                limit: int = 10, budget: OutputBudget = 16384,
-               current_session_id: str | None = None) -> str:
+               current_session_id: str | None = None, sources: list[str] | None = None,
+               all_sources: bool = False) -> str:
         """Find past evidence. Pass current_session_id for thread exclusion on shared MCP hosts.
 
         Normally omit budget. It limits serialized JSON output, including metadata, in UTF-8
@@ -82,7 +83,7 @@ def create_mcp(data_dir: Path, client: Client | None = None, provider=None) -> F
         if not include_current_session and current:
             exclude.append(current)
         query = SearchQuery(text, literal, role, after, before, project, session_id, producer,
-                            tuple(exclude), include_subagents, limit)
+                            tuple(exclude), include_subagents, limit, sources=sources, all_sources=all_sources)
         result = await dispatch(invoke, "search", asdict(query))
         result['current_thread_exclusion'] = ('disabled_by_request' if include_current_session
                                               else 'applied' if current else 'unknown')

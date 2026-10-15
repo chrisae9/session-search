@@ -3,6 +3,7 @@
 This checklist records delivered behavior, separately from the target architecture. Replica, Restic and offload features are optional. Operator-owned backups are the default boundary; a second repository or machine is not a core deployment requirement.
 
 - [x] Standalone Python package and optional dependency groups.
+- [x] Opt-in Pi v3 capture with separate capture/search defaults, shared retrieval filters, and replicated search policy; see [session providers](usage.md#session-providers).
 - [x] Codex parser extraction with existing regression fixtures.
 - [x] Streaming ownership scan and response parsing without retaining ignored raw payloads.
 - [x] Bounded byte staging of complete records, including large partial tails, with strict validation during parsing.

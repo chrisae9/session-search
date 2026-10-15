@@ -377,3 +377,72 @@ catalog or queue ingestion; a failed cache write does not undo captured evidence
 The flag remains opt-in. It is enabled in the Mac pilot after capture/queue
 qualification and a successful scheduled reuse; other clients need their own
 performance qualification.
+
+## Session providers
+
+Capture settings are independent of search defaults. Pass a TOML file with the
+**global** `--providers-config` option before `capture` or `sync`:
+
+```toml
+[providers.codex]
+capture_enabled = true
+search_by_default = true
+
+[providers.pi]
+capture_enabled = true
+search_by_default = true
+
+[providers.pi-legacy]
+search_by_default = true
+```
+
+Without a provider config, capture remains Codex-only. With a config, an omitted
+provider or omitted `capture_enabled` is disabled. `--pi-home` selects the Pi agent
+directory containing `sessions`; its default is the user's `.pi/agent` directory.
+Both sources share the sync byte budget, upload queue, and retry behavior. The sync
+receipt reports counts and errors for each provider. Disabling capture preserves
+previously indexed history.
+
+Apply the file's `search_by_default` values on the primary separately:
+
+```sh
+session-search --data-dir DATA --providers-config PROVIDERS.toml configure-providers
+```
+
+This changes catalog metadata and publication identity. Replicas inherit the
+settings when their next snapshot activates; no conversation reindex is needed.
+The command updates only explicitly supplied search defaults. Capture settings
+remain local to each producer. Current `pi` sessions and `pi-legacy` imported history are included by default.
+Set a provider's `search_by_default = false` and apply the configuration to exclude it. The public `pi-legacy` label also matches records stored under the older
+`pi-dev` name, which remains a supported query alias. Immutable records and citations
+are unchanged. Other sources remain searchable unless explicitly disabled.
+`pi-legacy` has no live capture provider; only its search default is configurable.
+
+CLI `search --source pi` or MCP `search(sources=["pi"])` explicitly overrides the
+defaults. Repeat `--source` or supply multiple source names to search a selection;
+`--all-sources` / `all_sources=true` searches every source. An explicit source list
+and all-sources flag are mutually exclusive. Filters apply before keyword and
+semantic ranking. Responses include `source_scope`; status lists indexed source
+counts and defaults. Citation expansion is independent of default visibility.
+These defaults control retrieval convenience, not authorization.
+
+Pi capture supports session format v3 and follows the latest persisted entry's
+parent chain. It applies branch-local context edits, labels compaction summaries
+as context, and excludes thinking/image blocks from searchable text. Other
+branches remain in raw archives when raw archival is enabled; they are not
+independently indexed in this version. Existing immutable citations remain valid
+when a later capture changes the active branch. Pi uses full parsing of changed
+files; Codex's incremental parser is unchanged. Pi raw files are never candidates
+for the Codex offload workflow unless incorrectly placed inside the Codex source
+root. Keep source directories separate.
+
+
+### Pi sessions without saved history
+
+Start Pi with `pi --no-session` to use an in-memory session. Pi does not write a
+session-history file for the collector to capture. This setting applies at startup;
+Session Search does not currently provide a per-session capture opt-out for an
+already-saved conversation. A prompt asking an agent not to record something does
+not control the background collector. Provider capture toggles stop future capture
+for the whole provider and do not remove previously uploaded evidence. Session
+persistence settings do not control files written by tools or other logging systems.

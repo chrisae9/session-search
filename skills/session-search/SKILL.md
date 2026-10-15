@@ -6,8 +6,19 @@ description: Search prior coding sessions for decisions, learned patterns, and e
 # Session Search
 
 Use the configured Session Search MCP tools: `search`, `context`, and `status`.
-They are read-only. Codex is the live capture source; historical imports can include
-other coding tools. Search evidence and raw-file backups have separate coverage.
+They are read-only. Capture can include Codex and opt-in Pi sessions; historical
+imports can include other coding tools. Search evidence and raw-file backups have
+separate coverage.
+
+Search uses the catalog's configured source defaults. Current Pi sessions (`pi`) and imported Pi history (`pi-legacy`) are included by
+default, unless the catalog configuration explicitly disables them. When the user asks about
+all Pi history, pass `sources: ["pi", "pi-legacy"]`. Use `sources: ["pi"]` for
+current Pi capture only. `pi-dev` remains a query alias for `pi-legacy`. Use an explicit
+source list for a selection, or `all_sources: true` for every indexed source; these
+options are mutually exclusive. Inspect `source_scope` and status source counts
+before treating an excluded source as missing history. Citation expansion works
+regardless of source defaults. Older tool schemas may need an MCP reconnect before
+source overrides become available.
 
 Normally omit `budget` to use the tool default. When a specific output limit is
 needed, use 1,024–65,536 UTF-8 bytes including response metadata; search defaults

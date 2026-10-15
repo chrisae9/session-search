@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from session_search.capture.local import capture_home
+from session_search.capture.local import capture_providers
 from session_search.capture.queue import UploadQueue
 from session_search.storage.catalog import Catalog
 from session_search.core.records import canonical_json
@@ -32,7 +32,8 @@ def _record(root: Path, result: dict) -> dict:
 def sync_once(root: Path, home: Path, producer: str, *, client=None,
               max_bytes: int, max_pending_bytes: int | None = None,
               reserve_bytes: int = 2 * 1024 ** 3, archive_raw=False, chunk_raw=False, incremental=False,
-              flush_limit: int = 100) -> dict:
+              flush_limit: int = 100, pi_home: Path | None = None,
+              providers_config: Path | None = None) -> dict:
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError('sync requires a positive capture byte budget')
     if type(reserve_bytes) is not int or reserve_bytes < 0:
@@ -54,7 +55,8 @@ def sync_once(root: Path, home: Path, producer: str, *, client=None,
             return {'version': 1, 'status': 'coalesced'}
         if not client:
             with Catalog(root) as catalog:
-                captured = capture_home(catalog, home, producer, archive_raw=archive_raw,
+                captured = capture_providers(catalog, home, producer, pi_home=pi_home,
+                                        providers_config=providers_config, archive_raw=archive_raw,
                                         chunk_raw=chunk_raw, incremental=incremental, max_bytes=max_bytes,
                                         reserve_bytes=reserve_bytes)
             return _record(root, {'version': 1, 'status': captured['status'], 'capture': captured})
@@ -71,7 +73,8 @@ def sync_once(root: Path, home: Path, producer: str, *, client=None,
             if remaining == 0:
                 captured = {'status': 'deferred', 'reason': 'backlog_byte_budget'}
             else:
-                captured = capture_home(queue, home, producer, archive_raw=archive_raw,
+                captured = capture_providers(queue, home, producer, pi_home=pi_home,
+                                        providers_config=providers_config, archive_raw=archive_raw,
                                         chunk_raw=chunk_raw, incremental=incremental, max_bytes=min(max_bytes, remaining),
                                         reserve_bytes=reserve_bytes)
             # Do not immediately repeat a shared outage request. The next cycle

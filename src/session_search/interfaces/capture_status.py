@@ -77,6 +77,14 @@ def capture_status(root: Path) -> dict:
             if any(type(count) is not int or count < 0 for count in selected.values()):
                 raise ValueError('invalid parser counts')
             result['parser'] = selected
+        if 'providers' in capture:
+            providers = capture['providers']
+            if not isinstance(providers, dict) or set(providers) - {'codex', 'pi'}:
+                raise ValueError('invalid provider capture summary')
+            result['providers'] = {name: {'status': data['status'],
+                'counts': data.get('counts', {}), 'discovered': data.get('discovered', 0),
+                'capture_error_count': len(data.get('errors', []))}
+                for name, data in providers.items()}
         return result
     except FileNotFoundError:
         return {'status': 'not_observed'}

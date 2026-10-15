@@ -16,6 +16,9 @@ from pathlib import Path
 from session_search.core.records import Citation, SearchQuery, SessionRevision, canonical_json, digest
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS source_defaults (
+ source TEXT PRIMARY KEY, search_enabled INTEGER NOT NULL CHECK(search_enabled IN (0,1))
+);
 CREATE TABLE IF NOT EXISTS publication_state (
  id INTEGER PRIMARY KEY CHECK(id=1), identity TEXT NOT NULL, epoch INTEGER NOT NULL
 );
@@ -296,9 +299,53 @@ class Catalog:
         return self.db.execute("SELECT 1 FROM raw_sources WHERE path=? AND fingerprint=?",
                                (path, fingerprint)).fetchone() is not None
 
+    def source_defaults(self):
+        defaults = {"pi": True, "pi-legacy": True}
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='source_defaults'").fetchone():
+            defaults.update({("pi-legacy" if r[0] == "pi-dev" else r[0]): bool(r[1])
+                             for r in self.db.execute(
+                                 "SELECT source,search_enabled FROM source_defaults ORDER BY source")})
+        return defaults
+
+    def configure_sources(self, defaults: dict[str, bool]):
+        if self.readonly:
+            raise PermissionError("source defaults require a writable primary")
+        if any(not isinstance(source, str) or not source or len(source) > 64
+               or type(enabled) is not bool for source, enabled in defaults.items()):
+            raise ValueError("source defaults require source names and booleans")
+        with self.db:
+            for source, enabled in defaults.items():
+                if source in {"pi-dev", "pi-legacy"}:
+                    source = "pi-legacy"
+                    self.db.execute("DELETE FROM source_defaults WHERE source='pi-dev'")
+                self.db.execute("INSERT OR REPLACE INTO source_defaults VALUES (?,?)", (source, int(enabled)))
+            self.db.execute("UPDATE publication_state SET epoch=epoch+1 WHERE id=1")
+
+    @staticmethod
+    def expand_sources(sources):
+        return sorted({label for source in sources for label in (
+            ("pi-dev", "pi-legacy") if source in {"pi-dev", "pi-legacy"} else (source,))})
+
+    def source_scope(self, query):
+        if query.sources is not None:
+            return {"mode": "explicit", "sources": list(dict.fromkeys(
+                "pi-legacy" if source == "pi-dev" else source for source in query.sources))}
+        return {"mode": "all" if query.all_sources else "defaults",
+                "excluded_sources": [] if query.all_sources else sorted(
+                    s for s, enabled in self.source_defaults().items() if not enabled)}
+
     def scope(self, query: SearchQuery):
         conditions = []
         args: list = []
+        if query.sources is not None:
+            sources = self.expand_sources(query.sources)
+            conditions.append("r.source IN (" + ",".join("?" for _ in sources) + ")")
+            args.extend(sources)
+        elif not query.all_sources:
+            excluded = self.expand_sources(s for s, enabled in self.source_defaults().items() if not enabled)
+            if excluded:
+                conditions.append("r.source NOT IN (" + ",".join("?" for _ in excluded) + ")")
+                args.extend(excluded)
         if query.role:
             conditions.append("e.role=?")
             args.append(query.role)
@@ -400,7 +447,8 @@ class Catalog:
             results = rank_results(query, results)[:query.limit]
         return {"version": 1, "status": "ok" if results else "no_matches",
                 "mode": "keyword", "semantic_available": False, "results": results,
-                "more_matches": len(rows) > query.limit, "coverage": self.status()}
+                "more_matches": len(rows) > query.limit, "coverage": self.status(),
+                "source_scope": self.source_scope(query)}
 
     def context(self, citations: list[Citation | dict], *, neighbors: int = 2) -> dict:
         if len(citations) > 100 or not 0 <= neighbors <= 10:
@@ -480,6 +528,12 @@ class Catalog:
                   "write_fenced": (self.root / "FENCED.json").exists(),
                   "semantic_indexed": None,
                   "replication": {"status": "not_configured"}, "backup": "not_configured"}
+        result["source_defaults"] = self.source_defaults()
+        result["sources"] = [dict(r) for r in self.db.execute(
+            "SELECT CASE r.source WHEN 'pi-dev' THEN 'pi-legacy' ELSE r.source END source,"
+            "COUNT(*) sessions,SUM(r.event_count) events FROM heads h "
+            "JOIN revisions r USING(session_id,revision) GROUP BY "
+            "CASE r.source WHEN 'pi-dev' THEN 'pi-legacy' ELSE r.source END")]
         receipts = self.root / "replication-receipts"
         if receipts.exists():
             acknowledgements = []
