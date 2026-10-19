@@ -1,10 +1,8 @@
 import json
-import time
 
 import numpy as np
 import pytest
 
-from session_search.core.deadlines import SearchDeadline
 from session_search.core.records import Event, SearchQuery, SessionRevision
 from session_search.storage.catalog import Catalog
 from session_search.storage.semantic import hybrid_search, index_pending
@@ -85,19 +83,58 @@ def test_background_cache_is_incremental_and_search_never_creates_it(tmp_path):
             vector_cache.build(c, p.identity)
 
 
-def test_cache_deadline_is_controlled_not_an_unbounded_sqlite_retry(tmp_path, monkeypatch):
+def test_search_finishes_semantic_ranking_after_twenty_seconds(tmp_path, monkeypatch):
+    from session_search.storage import semantic
+    clock = [100.0]
+    class Slow(FakeProvider):
+        def embed(self, text, *, query=False):
+            if query:
+                clock[0] += 45
+            return super().embed(text, query=query)
+    with Catalog(tmp_path) as c:
+        seed(c)
+        p = Slow()
+        index_pending(c, p)
+        assert not c.search(SearchQuery('restore'))['results']
+        monkeypatch.setattr(semantic.time, 'monotonic', lambda: clock[0])
+        result = hybrid_search(c, SearchQuery('restore'), p)
+        assert result['mode'] == 'hybrid' and result['results']
+        assert not result.get('degraded')
+        assert result['timings_ms']['total_ms'] == 45000
+
+
+@pytest.mark.parametrize('damage', ['missing', 'corrupt', 'omitted', 'reordered', 'watermark'])
+def test_damaged_or_incomplete_cache_is_rejected_and_repaired(tmp_path, damage):
     with Catalog(tmp_path) as c:
         seed(c)
         p = FakeProvider()
         index_pending(c, p)
-        with pytest.raises(SearchDeadline):
-            vector_cache.scores(c, p.identity, np.asarray([1, 0], dtype='<f4'), deadline=time.monotonic() - 1)
-        def expired(*args, **kwargs):
-            raise SearchDeadline()
-        monkeypatch.setattr(vector_cache, 'scores', expired)
-        result = hybrid_search(c, SearchQuery('recovery'), p)
-        assert result['mode'] == 'keyword' and result['results']
-        assert result['degradation_reason'] == 'search_deadline'
+        expected = hybrid_search(c, SearchQuery('restore'), p)['results']
+        root = c.root / 'vector-cache' / p.identity.key
+        path = root / 'manifest.json'
+        manifest = json.loads(path.read_text())
+        if damage in ['missing', 'corrupt']:
+            segment = root / manifest['segments'][0]['f32']
+            if damage == 'missing':
+                segment.unlink()
+            else:
+                segment.chmod(0o600)
+                segment.write_bytes(np.asarray([0, 1], dtype='<f4').tobytes())
+        else:
+            if damage == 'watermark':
+                manifest['watermark'] += 100
+            elif damage == 'reordered':
+                manifest['segments'] += manifest['segments']
+            else:
+                manifest['segments'] = []
+            path.write_text(json.dumps(manifest))
+        result = hybrid_search(c, SearchQuery('restore'), p)
+        assert result['vector_engine'] == 'sqlite' and result['results'] == expected
+        assert vector_cache.build(c, p.identity)['status'] == 'ready'
+        repaired = hybrid_search(c, SearchQuery('restore'), p)
+        assert repaired['vector_engine'] == 'exact_mmap_ranked'
+        assert repaired['results'] == expected
+        assert vector_cache.build(c, p.identity)['status'] == 'unchanged'
 
 
 def test_ranked_cache_preserves_exact_top_events_with_filters_and_score_ties(tmp_path, monkeypatch):
@@ -126,3 +163,22 @@ def test_ranked_cache_preserves_exact_top_events_with_filters_and_score_ties(tmp
             assert cached['vector_engine'] == 'exact_mmap_ranked'
             assert cached['results'] == reference['results']
             assert cached['more_matches'] == reference['more_matches']
+
+
+def test_manifest_publication_without_catalog_anchor_falls_back_and_recovers(tmp_path, monkeypatch):
+    with Catalog(tmp_path) as c:
+        seed(c)
+        p = FakeProvider()
+        index_pending(c, p)
+        with c.db:
+            c.db.execute('INSERT INTO vectors VALUES (?,?,?)',
+                         (p.identity.key, 'tail', np.asarray([1, 0], dtype='<f4').tobytes()))
+        def interrupted(*args):
+            raise OSError('simulated publication interruption')
+        with monkeypatch.context() as patch:
+            patch.setattr(vector_cache, 'sync_directory', interrupted)
+            with pytest.raises(OSError):
+                vector_cache.build(c, p.identity)
+        assert vector_cache.scores(c, p.identity, np.asarray([1, 0], dtype='<f4')) is None
+        assert vector_cache.build(c, p.identity)['status'] == 'ready'
+        assert len(vector_cache.scores(c, p.identity, np.asarray([1, 0], dtype='<f4'))[0]) == 2

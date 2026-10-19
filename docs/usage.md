@@ -114,7 +114,8 @@ status, including those invoked through `mcp`. Put it before the subcommand.
 The default is 30 seconds; values must be greater than zero and at most 60.
 For example, `--read-timeout 45` allows a measured larger-catalog search to finish
 without changing its retrieval mode. Each endpoint gets this allowance, so a
-longer timeout can also delay failover. It is not a total operation deadline and
+longer timeout can also delay failover. Progress-aware searches can exceed this
+duration while work continues. It is not a total operation deadline and
 does not change upload timeouts, embedding-provider timeouts, or local searches.
 
 Normalized payloads over 8 MiB automatically use resumable 1 MiB chunks in a separate temporary namespace. A checksum-verified payload then goes through the same revision conflict and idempotency checks as an ordinary upload. Successful ingestion removes this transfer copy; it does not archive raw files. The current normalized payload ceiling is 256 MiB. Larger payloads remain in the client queue as rejected work, requiring a supported format or size change before retry. Large JSON parsing is serialized across server worker processes to bound memory use; busy clients retain their payloads and retry.
@@ -136,8 +137,8 @@ worker is started. A stalled pending inference is terminated when a subsequent
 call observes its 60-second execution limit. Local CLI and HTTP inference run
 synchronously; the local timeout settings apply only to the isolated MCP worker.
 Remote settings are independent socket I/O timeouts, not a full-search deadline.
-The client's `--read-timeout` is separate and should leave room for embedding
-and retrieval on the server.
+The client's `--read-timeout` is separate and should cover the longest interval
+without observable progress, including the embedding request.
 
 An embedding timeout returns keyword results with `degraded: true` and
 `degradation: "TimeoutError"`. Local MCP also reports `degradation_reason`:
@@ -456,7 +457,11 @@ on every query. Broad searches visit candidates in exact score order and stop
 only after proving the same top-event cutoff, including ties. Selective searches
 retain their scoped metadata join. New vectors beyond the cache watermark are
 scored from SQLite; vector updates or deletions invalidate the cache. Missing,
-incompatible, or corrupt segments select the SQLite path.
+incompatible, or corrupt segments select the SQLite path. The catalog anchors the
+entire manifest digest, preventing an omitted segment or edited watermark from
+silently narrowing retrieval. Background construction validates existing segments
+before reuse and automatically rebuilds damaged or incomplete caches. A crash
+between manifest publication and anchor commit safely selects SQLite until repair.
 
 Construction runs in the background, requires the embeddings extra, and leaves
 2 GiB of free space plus the next segment's size. It can temporarily retain both
@@ -470,20 +475,30 @@ it as `current`, `stale`, or `not_computed`, with its computation timestamp when
 available; stale or unknown counts do not prevent retrieval. Interactive searches
 no longer count the full corpus for every request.
 
-Hybrid computation checks a 20-second budget between vector batches. If it expires,
-the response contains keyword results with `degraded: true` and
-`degradation_reason: search_deadline`. This is a cooperative budget, not a hard
-interrupt of an individual SQLite or embedding operation. Cold cache validation
-can trigger this fallback. The remote client's separate default socket timeout
-remains 30 seconds. Transport errors distinguish `search_timeout`, `search_busy`,
-and unreachable servers instead of reporting every timeout as a connection failure.
+Hybrid retrieval has no elapsed-time cutoff. Progress-aware HTTP clients request
+newline-delimited JSON: the server emits a small progress frame only when SQLite
+executes work or a vector batch advances, then sends the complete result. The
+client's default 30-second socket timeout therefore measures lack of observed
+progress, not total search duration. A search can finish after minutes of active
+work without losing semantic results. No progress before the idle timeout reports
+`search_progress_timeout`; it does not substitute keyword results. This indicates
+missing progress, not proof of a deadlock. A disconnected caller cooperatively
+cancels remaining work, with its search slot retained until the worker exits.
+
+Embedding-provider failures retain their explicit, separately configured fallback
+behavior. Context/status and older HTTP servers still use their ordinary socket
+read timeout. Legacy JSON search clients remain compatible, but must reconnect
+with the updated client to wait on progress. Neither transport changes filters,
+ranking, or citation identities.
 
 The HTTP server logs request IDs, duration, search mode, vector engine, stage
 timings, and sanitized failure types through its normal application logger.
 It does not log query text, excerpts, credentials, or client endpoint URLs.
 Responses include the request ID for correlating an incident with server logs.
 
-SSH replication checks destination status before validating or creating a large
-snapshot. An unreachable destination returns retryable deferred status with
+SSH replication probes destination capacity with zero incoming bytes and zero
+reserve before validating or creating a large snapshot. The probe works before
+the first replica catalog exists. An unreachable destination returns retryable
+deferred status with
 `standby_unreachable` and `destination_preflight`, retaining pending snapshots
 and the last acknowledgement for the next scheduled attempt.

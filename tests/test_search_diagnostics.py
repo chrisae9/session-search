@@ -42,3 +42,25 @@ def test_search_logs_contain_timings_but_no_query_evidence_or_credentials(tmp_pa
     assert record['operation'] == 'search' and record['elapsed_ms'] >= 0
     assert 'sensitive-query-text' not in caplog.text
     assert 'Bearer' not in caplog.text
+
+
+@pytest.mark.parametrize('failure', ['incomplete', 'tls'])
+def test_incomplete_http_response_does_not_escape_client(tmp_path, failure):
+    import http.client
+    token = tmp_path / 'token'
+    token.write_text('test-only')
+    client = Client('http://127.0.0.1:1', token)
+    class Response:
+        headers = {'Content-Type': 'application/x-ndjson'}
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def readline(self, *args):
+            if failure == 'tls':
+                import ssl
+                raise ssl.SSLEOFError('synthetic TLS disconnect')
+            raise http.client.IncompleteRead(b'partial')
+    client.opener.open = lambda *a, **k: Response()
+    result = client.read('search', {'text': 'query'})
+    assert result['reason'] == 'search_interrupted'

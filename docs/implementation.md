@@ -20,7 +20,8 @@ This checklist records delivered behavior, separately from the target architectu
 - [x] Per-run capture byte admission and data-filesystem staging capacity preflights.
 - [x] Idle client queue compaction that preserves acknowledgements and capture checkpoints.
 - [x] Hybrid retrieval and explicit local/remote embedding providers.
-- [x] Background exact vector segments, ranked candidate traversal, cached coverage, and controlled keyword fallback with privacy-safe search diagnostics.
+- [x] Background exact vector segments, ranked candidate traversal, cached coverage, and privacy-safe search diagnostics.
+- [x] Catalog-anchored cache completeness, automatic cache repair, and progress-aware HTTP retrieval without an elapsed search cutoff.
 - [x] Destination reachability preflight before costly replication snapshot work.
 - [x] Process-shared background embedding admission and bounded retries during provider outages.
 - [x] Two-minute pilot embedding contention check: 120 foreground queries and 809 background requests completed without failures.

@@ -120,11 +120,13 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
         # or verification before its availability is established.
         try:
             response = json.loads(runner([*ssh, shlex.join([
-                remote_executable, '--data-dir', remote_data, 'status'])]))
+                remote_executable, '--data-dir', remote_data, 'replica-capacity', '0',
+                '--reserve-bytes', '0'])]))
         except RuntimeError:
             return {'version': 1, 'status': 'deferred', 'reason': 'standby_unreachable',
                     'stage': 'destination_preflight', 'retryable': True}
-        if response.get('version') != 1 or response.get('status') != 'ok':
+        if (response.get('version') != 1 or response.get('status') != 'ready'
+                or response.get('incoming_bytes') != 0 or response.get('reserve_bytes') != 0):
             raise ValueError('standby did not acknowledge the availability preflight')
         if pending.exists() and receipt:
             previous = verify_snapshot(pending)

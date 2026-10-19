@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from session_search.core.output import bounded_response
 from session_search.core.protocol import MAX_REQUEST, MAX_REVISION_UPLOAD
@@ -36,7 +36,7 @@ class SearchPool:
         self.capacity = threading.BoundedSemaphore(workers)
         self.tasks = set()
 
-    async def run(self, function, *args):
+    def start(self, function, *args):
         if not self.capacity.acquire(blocking=False):
             raise SearchBusy()
         task = asyncio.create_task(asyncio.to_thread(function, *args))
@@ -49,7 +49,32 @@ class SearchPool:
                 finished.exception()
 
         task.add_done_callback(completed)
-        return await asyncio.shield(task)
+        return task
+
+    async def run(self, function, *args):
+        return await asyncio.shield(self.start(function, *args))
+
+
+class SearchAborted(Exception):
+    """A disconnected streaming caller no longer needs this search."""
+
+
+class SearchProgress:
+    def __init__(self):
+        self.stopped = threading.Event()
+        self.updated = time.monotonic()
+
+    def advance(self):
+        if self.stopped.is_set():
+            raise SearchAborted()
+        self.updated = time.monotonic()
+
+    def sqlite_step(self):
+        if self.stopped.is_set():
+            return 1
+        self.advance()
+        return 0
+
 
 def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
                provider=None, chunk_raw: bool = False,
@@ -172,12 +197,15 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
             return {"version": 1, "status": "ok", "coverage": catalog.status(),
                     "server_role": "standby" if readonly else "primary"}
 
-    def run_search(query, budget, request_id):
+    def run_search(query, budget, request_id, progress=None):
         started = time.monotonic()
         record = {"operation": "search", "request_id": request_id, "literal": query.literal}
         try:
             from session_search.storage.semantic import hybrid_search
             with read() as catalog:
+                if progress:
+                    catalog.search_progress = progress.advance
+                    catalog.db.set_progress_handler(progress.sqlite_step, 10000)
                 result = hybrid_search(catalog, query, provider)
             result['request_id'] = request_id
             record.update(status=result.get('status'), mode=result.get('mode'),
@@ -197,7 +225,30 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
         budget = data.pop("budget", 16384)
         query = SearchQuery(**data)
         try:
-            return await search_pool.run(run_search, query, budget, uuid.uuid4().hex)
+            request_id = uuid.uuid4().hex
+            if 'application/x-ndjson' not in request.headers.get('accept', ''):
+                return await search_pool.run(run_search, query, budget, request_id)
+            progress = SearchProgress()
+            task = search_pool.start(run_search, query, budget, request_id, progress)
+
+            async def stream():
+                sent = 0
+                try:
+                    while not task.done():
+                        if progress.updated > sent:
+                            sent = progress.updated
+                            yield canonical_json({'version': 1, 'type': 'progress'}) + '\n'
+                        await asyncio.wait({task}, timeout=0.5)
+                    yield canonical_json({'version': 1, 'type': 'result',
+                                          'result': task.result()}) + '\n'
+                except Exception:
+                    yield canonical_json({'version': 1, 'type': 'error',
+                                          'reason': 'search_failed'}) + '\n'
+                finally:
+                    progress.stopped.set()
+
+            return StreamingResponse(stream(), media_type='application/x-ndjson',
+                                     headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-store'})
         except SearchBusy:
             logging.getLogger('uvicorn.error').warning(canonical_json({
                 'operation': 'search', 'status': 'unavailable', 'reason': 'search_busy'}))

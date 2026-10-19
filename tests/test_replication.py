@@ -34,8 +34,6 @@ def test_replication_resumes_failed_transfer_and_skips_unchanged_publication(tmp
         if command.startswith('umask'):
             return ''
         parts = shlex.split(command)
-        if parts[-1] == 'status':
-            return json.dumps({'version': 1, 'status': 'ok'})
         if 'replica-capacity' in parts:
             index = parts.index('replica-capacity')
             return json.dumps(capacity(replica, int(parts[index + 1]), int(parts[-1])))
@@ -152,9 +150,9 @@ def test_capacity_deferral_retains_pending_snapshot_and_does_not_upload(tmp_path
         calls.append(arguments)
         assert arguments[0] == 'ssh'
         parts = shlex.split(arguments[-1])
-        if parts[-1] == 'status':
-            return json.dumps({'version': 1, 'status': 'ok'})
         index = parts.index('replica-capacity')
+        if int(parts[index + 1]) == 0 and int(parts[-1]) == 0:
+            return json.dumps(capacity(tmp_path / 'empty-destination', 0, 0))
         return json.dumps({'version': 1, 'status': 'deferred', 'reason': 'capacity',
                            'incoming_bytes': int(parts[index + 1]),
                            'reserve_bytes': int(parts[-1]), 'free_bytes': 0})
@@ -192,7 +190,7 @@ def test_unreachable_destination_skips_expensive_snapshot_work_and_preserves_pen
     monkeypatch.setattr(replication, 'create_snapshot', forbidden)
     monkeypatch.setattr(replication, 'verify_snapshot', forbidden)
     def offline(args):
-        assert 'status' in args[-1]
+        assert shlex.split(args[-1])[-4:] == ['replica-capacity', '0', '--reserve-bytes', '0']
         raise RuntimeError('transport unavailable')
     for pending in [False, True]:
         if pending:
@@ -203,3 +201,13 @@ def test_unreachable_destination_skips_expensive_snapshot_work_and_preserves_pen
         assert result['stage'] == 'destination_preflight'
         if pending:
             assert (outbox / 'pending/keep').read_text() == 'retained'
+
+
+def test_preflight_cli_works_before_destination_catalog_exists(tmp_path, capsys):
+    from session_search.interfaces.cli import main
+    destination = tmp_path / 'empty' / 'replica'
+    assert main(['--data-dir', str(destination), 'replica-capacity', '0',
+                 '--reserve-bytes', '0']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'ready'
+    assert not destination.exists()

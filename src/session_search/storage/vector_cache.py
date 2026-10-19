@@ -7,7 +7,6 @@ vectors invalidate it; inserts after its watermark are scored from SQLite.
 
 import fcntl
 import functools
-import time
 import hashlib
 import json
 import os
@@ -34,7 +33,7 @@ def _manifest(root):
     if path.is_symlink() or path.stat().st_size > 4 * 1024 * 1024:
         raise ValueError('invalid vector cache manifest')
     value = json.loads(path.read_text())
-    if value.get('version') != 1 or not isinstance(value.get('segments'), list):
+    if not isinstance(value, dict) or value.get('version') != 2 or not isinstance(value.get('segments'), list):
         raise ValueError('invalid vector cache manifest')
     return value
 
@@ -71,7 +70,13 @@ def build(catalog, identity, *, reserve_bytes=2 * 1024 ** 3):
             previous = {}
         catalog.db.execute('BEGIN')
         try:
-            valid = bool(previous) and compatible(previous, catalog, identity)
+            valid = bool(previous) and compatible(previous, catalog, identity) and anchored(previous, catalog, identity)
+            if valid:
+                try:
+                    for _ in iter_segments(root, previous, identity):
+                        pass
+                except (OSError, ValueError, KeyError, TypeError, OverflowError):
+                    valid = False
             low = previous['watermark'] if valid else 0
             high = catalog.db.execute('SELECT COALESCE(MAX(rowid),0) FROM vectors').fetchone()[0]
             if low > high:
@@ -81,10 +86,6 @@ def build(catalog, identity, *, reserve_bytes=2 * 1024 ** 3):
             if shutil.disk_usage(root).free < reserve_bytes + SEGMENT_ROWS * (identity.dimensions * 4 + 8):
                 return {'status': 'deferred', 'reason': 'vector_cache_capacity'}
             segments = list(previous['segments']) if valid else []
-            retained = {entry[key] for entry in previous.get('segments', []) for key in ('i64', 'f32')}
-            for orphan in root.iterdir():
-                if NAME.fullmatch(orphan.name) and orphan.name not in retained:
-                    orphan.unlink()
             cursor = catalog.db.execute(
                 'SELECT rowid,vector FROM vectors NOT INDEXED WHERE rowid>? AND rowid<=? '
                 'AND identity=? ORDER BY rowid', (low, high, identity.key))
@@ -99,7 +100,7 @@ def build(catalog, identity, *, reserve_bytes=2 * 1024 ** 3):
                 for suffix, data in [('i64', ids.tobytes()), ('f32', matrix.tobytes())]:
                     name = hashlib.sha256(data).hexdigest() + '.' + suffix
                     path = root / name
-                    if not path.exists():
+                    if not valid_file(path, len(data)):
                         fd, temporary = tempfile.mkstemp(prefix='.segment-', dir=root)
                         try:
                             with os.fdopen(fd, 'wb') as stream:
@@ -112,7 +113,7 @@ def build(catalog, identity, *, reserve_bytes=2 * 1024 ** 3):
                             Path(temporary).unlink(missing_ok=True)
                     entry[suffix] = name
                 segments.append(entry)
-            value = {'version': 1, 'publication_identity': catalog.publication().split(':')[0],
+            value = {'version': 2, 'publication_identity': catalog.publication().split(':')[0],
                      'identity': identity.key, 'dimensions': identity.dimensions,
                      'epoch': epoch(catalog.db), 'watermark': high, 'segments': segments}
         finally:
@@ -127,6 +128,11 @@ def build(catalog, identity, *, reserve_bytes=2 * 1024 ** 3):
                 os.fsync(stream.fileno())
             os.replace(temporary, root / 'manifest.json')
             sync_directory(root)
+            # The catalog anchors the entire manifest, including its complete ID
+            # inventory. A missing/edited entry cannot silently narrow retrieval.
+            with catalog.db:
+                catalog.db.execute('INSERT OR REPLACE INTO vector_cache_manifests VALUES (?,?)',
+                                   (identity.key, manifest_digest(value)))
         finally:
             Path(temporary).unlink(missing_ok=True)
         referenced = {s[k] for s in segments for k in ('i64', 'f32')}
@@ -145,47 +151,69 @@ def _verified(path, inode, size, modified, changed):
         return hashlib.file_digest(stream, 'sha256').hexdigest() == Path(path).stem
 
 
-def scores(catalog, identity, query_vector, *, deadline=None):
-    """Return sorted row IDs and exact float32 scores, or no cache on any mismatch."""
+def manifest_digest(value):
+    return hashlib.sha256(canonical_json(value).encode()).hexdigest()
+
+
+def anchored(value, catalog, identity):
+    if not catalog.db.execute("SELECT 1 FROM sqlite_master WHERE name='vector_cache_manifests'").fetchone():
+        return False
+    row = catalog.db.execute('SELECT digest FROM vector_cache_manifests WHERE identity=?',
+                             (identity.key,)).fetchone()
+    return bool(row and row[0] == manifest_digest(value))
+
+
+def valid_file(path, size):
+    try:
+        if not NAME.fullmatch(path.name) or path.is_symlink():
+            return False
+        info = path.stat()
+        return info.st_size == size and _verified(str(path), info.st_ino, info.st_size,
+                                                  info.st_mtime_ns, info.st_ctime_ns)
+    except OSError:
+        return False
+
+
+def iter_segments(root, value, identity, progress=None):
+    import numpy as np
+    last = 0
+    for segment in value['segments']:
+        if progress:
+            progress()
+        rows = segment['rows']
+        if type(rows) is not int or not 1 <= rows <= SEGMENT_ROWS:
+            raise ValueError('invalid vector cache rows')
+        for suffix, size in [('i64', rows * 8), ('f32', rows * identity.dimensions * 4)]:
+            if not valid_file(root / segment[suffix], size):
+                raise ValueError('invalid vector cache segment')
+        ids = np.memmap(root / segment['i64'], dtype='<i8', mode='r', shape=(rows,))
+        matrix = np.memmap(root / segment['f32'], dtype='<f4', mode='r', shape=(rows, identity.dimensions))
+        if (int(ids[0]) <= last or not np.all(ids[1:] > ids[:-1])
+                or int(ids[-1]) > value['watermark'] or not np.isfinite(matrix).all()
+                or segment['first'] != int(ids[0]) or segment['last'] != int(ids[-1])):
+            raise ValueError('invalid vector cache ordering')
+        last = int(ids[-1])
+        yield ids, matrix
+
+
+def scores(catalog, identity, query_vector, *, progress=None):
+    """Return exact scores; reject unanchored/incomplete or damaged caches."""
     import numpy as np
     root = catalog.root / 'vector-cache' / identity.key
     try:
         value = _manifest(root)
-        if not compatible(value, catalog, identity):
+        if not compatible(value, catalog, identity) or not anchored(value, catalog, identity):
             return None
         all_ids, all_scores = [], []
-        last = 0
-        for segment in value['segments']:
-            if deadline is not None and time.monotonic() > deadline:
-                from session_search.core.deadlines import SearchDeadline
-                raise SearchDeadline()
-            rows = segment['rows']
-            if type(rows) is not int or not 1 <= rows <= SEGMENT_ROWS:
-                return None
-            for suffix, size in [('i64', rows * 8), ('f32', rows * identity.dimensions * 4)]:
-                name = segment[suffix]
-                path = root / name
-                if not NAME.fullmatch(name) or path.is_symlink():
-                    return None
-                info = path.stat()
-                if info.st_size != size or not _verified(str(path), info.st_ino, info.st_size,
-                                                         info.st_mtime_ns, info.st_ctime_ns):
-                    return None
-            ids = np.memmap(root / segment['i64'], dtype='<i8', mode='r', shape=(rows,))
-            matrix = np.memmap(root / segment['f32'], dtype='<f4', mode='r', shape=(rows, identity.dimensions))
-            if (int(ids[0]) <= last or not np.all(ids[1:] > ids[:-1])
-                    or int(ids[-1]) > value['watermark'] or not np.isfinite(matrix).all()):
-                return None
-            last = int(ids[-1])
+        for ids, matrix in iter_segments(root, value, identity, progress):
             all_ids.append(np.array(ids))
             all_scores.append(matrix @ query_vector)
         cursor = catalog.db.execute(
             'SELECT rowid,vector FROM vectors NOT INDEXED WHERE rowid>? AND identity=? ORDER BY rowid',
             (value['watermark'], identity.key))
         while rows := cursor.fetchmany(SEGMENT_ROWS):
-            if deadline is not None and time.monotonic() > deadline:
-                from session_search.core.deadlines import SearchDeadline
-                raise SearchDeadline()
+            if progress:
+                progress()
             ids = np.asarray([r[0] for r in rows], dtype='<i8')
             matrix = np.stack([np.frombuffer(r[1], dtype='<f4') for r in rows])
             if matrix.shape[1] != identity.dimensions or not np.isfinite(matrix).all():
@@ -194,7 +222,5 @@ def scores(catalog, identity, query_vector, *, deadline=None):
             all_scores.append(matrix @ query_vector)
         return (np.concatenate(all_ids) if all_ids else np.empty(0, dtype='<i8'),
                 np.concatenate(all_scores) if all_scores else np.empty(0, dtype='<f4'))
-    except TimeoutError:
-        raise
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import http.client
 import json
 import tempfile
 import urllib.error
@@ -62,9 +63,11 @@ class Client:
         request = urllib.request.Request(
             endpoint + route, data=(payload if isinstance(payload, bytes) else
                                    canonical_json(payload).encode() if payload is not None else None),
-            headers={"Content-Type": "application/octet-stream" if isinstance(payload, bytes)
+            headers={"Accept": "application/x-ndjson" if route == "/v1/search" else "application/json",
+                     "Content-Type": "application/octet-stream" if isinstance(payload, bytes)
                      else "application/json", "Authorization": "Bearer " + token}, method=method,
         )
+        streaming = False
         try:
             # Finalizing a multi-gigabyte raw file includes checksum verification.
             # Keep that allowance separate from interactive read failover.
@@ -72,6 +75,28 @@ class Client:
                 "objects", "revision-objects", "revisions",
             }
             with self.opener.open(request, timeout=self.upload_timeout if upload else self.timeout) as response:
+                headers = getattr(response, 'headers', {})
+                streaming = 'application/x-ndjson' in headers.get('Content-Type', '')
+                if streaming:
+                    while True:
+                        line = response.readline(66001)
+                        if not line or not line.endswith(b'\n'):
+                            raise RemoteError(502, reason='stream_interrupted')
+                        if len(line) > 66000:
+                            raise RemoteError(502)
+                        frame = json.loads(line)
+                        if not isinstance(frame, dict) or frame.get('version') != 1:
+                            raise RemoteError(502)
+                        if frame.get('type') == 'progress':
+                            continue
+                        if frame.get('type') == 'error':
+                            raise RemoteError(500, reason='search_failed')
+                        result = frame.get('result')
+                        if frame.get('type') != 'result' or not isinstance(result, dict) or result.get('version') != 1:
+                            raise RemoteError(502)
+                        if len(canonical_json(result).encode()) > 65536:
+                            raise RemoteError(502)
+                        return result
                 content = response.read(65537)
                 if len(content) > 65536:
                     raise RemoteError(502)
@@ -89,10 +114,12 @@ class Client:
                 except (OSError, ValueError, AttributeError):
                     pass
             raise RemoteError(exc.code, reason=reason) from None
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        except (urllib.error.URLError, OSError) as exc:
             cause = getattr(exc, 'reason', exc)
-            raise RemoteError(None, reason="read_timeout" if isinstance(cause, TimeoutError)
-                              else "connection_error") from None
+            raise RemoteError(None, reason=("search_progress_timeout" if streaming else "read_timeout")
+                              if isinstance(cause, TimeoutError) else "stream_interrupted" if streaming else "connection_error") from None
+        except http.client.HTTPException:
+            raise RemoteError(502, reason="stream_interrupted" if streaming else "connection_error") from None
         except (ValueError, UnicodeError):
             raise RemoteError(502) from None
 
@@ -110,7 +137,10 @@ class Client:
                     raise
                 failures.append({"server": "standby" if index else "primary",
                                  "reason": exc.reason, "http_status": exc.status})
-        reason = ("search_timeout" if any(f['reason'] == 'read_timeout' for f in failures)
+        reason = ("search_progress_timeout" if any(f['reason'] == 'search_progress_timeout' for f in failures)
+                  else "search_failed" if any(f['reason'] == 'search_failed' for f in failures)
+                  else "search_interrupted" if any(f['reason'] == 'stream_interrupted' for f in failures)
+                  else "search_timeout" if any(f['reason'] == 'read_timeout' for f in failures)
                   else "search_busy" if any(f['reason'] == 'search_busy' for f in failures)
                   else "search_servers_unreachable")
         return {"version": 1, "status": "unavailable", "reason": reason, "failures": failures}

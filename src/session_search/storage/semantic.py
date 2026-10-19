@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS semantic_coverage (
 CREATE TRIGGER IF NOT EXISTS semantic_coverage_insert AFTER INSERT ON vectors BEGIN
  DELETE FROM semantic_coverage WHERE identity=NEW.identity;
 END;
+CREATE TABLE IF NOT EXISTS vector_cache_manifests (
+ identity TEXT PRIMARY KEY, digest TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS embedding_failures (
  identity TEXT NOT NULL, content_hash TEXT NOT NULL, attempts INTEGER NOT NULL,
  next_attempt REAL NOT NULL, error TEXT NOT NULL,
@@ -183,7 +186,7 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             source = metadata_index.event_source() if metadata_index.ready(catalog.db) else "events e"
             from session_search.storage.vector_cache import scores as cache_scores
             stage = time.monotonic()
-            cached = cache_scores(catalog, provider.identity, vector, deadline=started + 20)
+            cached = cache_scores(catalog, provider.identity, vector, progress=getattr(catalog, "search_progress", None))
             timings["vector_cache_ms"] = round((time.monotonic() - stage) * 1000, 2)
             vector_column = "v.vector" if cached is None else "v.rowid AS vector_row"
             ranked = (cached is not None and not any((query.role, query.after, query.before,
@@ -211,9 +214,8 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                         if frontier < cutoff:
                             break
                     continue
-                if time.monotonic() > started + 20:
-                    from session_search.core.deadlines import SearchDeadline
-                    raise SearchDeadline()
+                if getattr(catalog, "search_progress", None):
+                    catalog.search_progress()
                 if cached is None:
                     matrix = np.stack([np.frombuffer(row["vector"], dtype="<f4") for row in rows])
                     if matrix.shape[1] != provider.identity.dimensions or not np.isfinite(matrix).all():
@@ -286,7 +288,7 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             lexical.update(mode="keyword", degraded=True, degradation="TimeoutError" if isinstance(exc, TimeoutError) else type(exc).__name__)
             reason = getattr(exc, 'reason', None)
             if reason in {'local_inference_busy', 'local_inference_execution_limit',
-                          'local_startup_timeout', 'local_query_timeout', 'search_deadline'}:
+                          'local_startup_timeout', 'local_query_timeout'}:
                 lexical['degradation_reason'] = reason
             lexical["more_matches"] = (lexical["more_matches"]
                                        or len(lexical["results"]) > query.limit)
