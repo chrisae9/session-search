@@ -94,15 +94,17 @@ def _index_pending(catalog: Catalog, provider, *, limit: int) -> dict:
         raise ValueError("embedding limit must be between 1 and 10000")
     prepare_chunks(catalog)
     identity = provider.identity.key
+    # Preserve sequential event traversal: the reverse hash index serves ranked
+    # retrieval but would turn this background scan into random evidence reads.
     rows = catalog.db.execute(
-        "WITH active AS (SELECT DISTINCT ec.content_hash FROM event_chunks ec "
+        "WITH active AS (SELECT DISTINCT ec.content_hash FROM event_chunks ec NOT INDEXED "
         "JOIN events e ON e.row_id=ec.event_row JOIN heads h "
         "ON e.session_id=h.session_id AND e.revision=h.revision) "
         "SELECT c.content_hash,c.text FROM active a JOIN semantic_chunks c "
         "ON c.content_hash=a.content_hash "
         "LEFT JOIN vectors v ON v.content_hash=c.content_hash AND v.identity=? "
         "LEFT JOIN embedding_failures f ON f.content_hash=c.content_hash AND f.identity=? "
-        "WHERE v.vector IS NULL AND COALESCE(f.next_attempt,0)<=? LIMIT ?",
+        "WHERE v.content_hash IS NULL AND COALESCE(f.next_attempt,0)<=? LIMIT ?",
         (identity, identity, time.time(), limit),
     ).fetchall()
     completed = failed = 0
