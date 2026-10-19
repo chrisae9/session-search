@@ -163,7 +163,8 @@ def test_model_identity_change_never_reuses_vectors(tmp_path):
         index_pending(catalog, provider)
         provider.identity = EmbeddingIdentity("another-artifact", dimensions=2)
         result = hybrid_search(catalog, SearchQuery("recovery"), provider)
-        assert result["coverage"]["semantic_indexed"] == 0
+        assert result["coverage"]["semantic_indexed"] is None
+        assert result["coverage"]["semantic_coverage_status"] == "not_computed"
         assert result["results"]  # Lexical result survives the model transition.
         assert index_pending(catalog, provider)["embedded"] == 2
 
@@ -278,6 +279,9 @@ def test_coverage_counts_only_complete_current_events_for_selected_model(tmp_pat
         catalog.db.execute('UPDATE vectors SET identity=? WHERE identity=? AND content_hash=?',
                            ('different-model', provider.identity.key, key))
         catalog.db.commit()
+        from session_search.storage.semantic import refresh_coverage
+        assert hybrid_search(catalog, SearchQuery('recovery'), provider)['coverage']['semantic_coverage_status'] == 'not_computed'
+        refresh_coverage(catalog, provider.identity.key)
         assert hybrid_search(catalog, SearchQuery('recovery'), provider)['coverage']['semantic_indexed'] == 2
 
 

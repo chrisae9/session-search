@@ -53,7 +53,10 @@ def test_index_preserves_entire_responses_filters_and_later_capture(tmp_path, mo
             with monkeypatch.context() as patch:
                 patch.setattr(metadata_index, 'ready', lambda db: False)
                 reference = hybrid_search(c, query, provider)
-            assert hybrid_search(c, query, provider) == reference
+            actual = hybrid_search(c, query, provider)
+            actual.pop('timings_ms', None)
+            reference.pop('timings_ms', None)
+            assert actual == reference
         old = c.search(SearchQuery('recovery', session_id='12'))['results'][0]['citation']
         c.ingest(SessionRevision('12', (Event('new', 'user', 'new recovery insight'),), project='new'),
                  producer='device', request_id='later')
@@ -120,4 +123,7 @@ def test_metadata_ranking_retains_imported_project_aliases(tmp_path, monkeypatch
         with monkeypatch.context() as patch:
             patch.setattr(metadata_index, 'ready', lambda db: False)
             reference = hybrid_search(c, query, provider)
-        assert hybrid_search(c, query, provider) == reference
+        actual = hybrid_search(c, query, provider)
+        actual.pop('timings_ms', None)
+        reference.pop('timings_ms', None)
+        assert actual == reference

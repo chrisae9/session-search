@@ -339,7 +339,7 @@ Broader workload and replica qualification remain outstanding.
 Keyword search ranks metadata first and reads transcript text only for the final
 matches. Scores, filters, ordering, and citations retain their existing semantics.
 Hybrid search also filters vector candidates through this index, then loads text
-for the final semantic hits. Vector scoring and coverage accounting are unchanged.
+for the final semantic hits. Exact vector scores, filtering, and citations are preserved.
 
 ```sh
 session-search --data-dir DATA_DIRECTORY build-metadata-index
@@ -446,3 +446,44 @@ already-saved conversation. A prompt asking an agent not to record something doe
 not control the background collector. Provider capture toggles stop future capture
 for the whole provider and do not remove previously uploaded evidence. Session
 persistence settings do not control files written by tools or other logging systems.
+
+
+## Exact vector cache and search diagnostics
+
+The embedding worker builds a disposable `vector-cache` directory beside the
+catalog. Immutable float32 segments avoid rereading vector blobs through SQLite
+on every query. Broad searches visit candidates in exact score order and stop
+only after proving the same top-event cutoff, including ties. Selective searches
+retain their scoped metadata join. New vectors beyond the cache watermark are
+scored from SQLite; vector updates or deletions invalidate the cache. Missing,
+incompatible, or corrupt segments select the SQLite path.
+
+Construction runs in the background, requires the embeddings extra, and leaves
+2 GiB of free space plus the next segment's size. It can temporarily retain both
+old and replacement segments. The cache is optional, is not replicated with
+snapshots, and never contains the authoritative citation records. To rebuild it,
+stop the embedding worker, remove only `DATA_DIRECTORY/vector-cache`, and restart
+the worker. Standby searches remain read-only and use SQLite without a local cache.
+
+Global semantic coverage is computed by the embedding worker. Responses identify
+it as `current`, `stale`, or `not_computed`, with its computation timestamp when
+available; stale or unknown counts do not prevent retrieval. Interactive searches
+no longer count the full corpus for every request.
+
+Hybrid computation checks a 20-second budget between vector batches. If it expires,
+the response contains keyword results with `degraded: true` and
+`degradation_reason: search_deadline`. This is a cooperative budget, not a hard
+interrupt of an individual SQLite or embedding operation. Cold cache validation
+can trigger this fallback. The remote client's separate default socket timeout
+remains 30 seconds. Transport errors distinguish `search_timeout`, `search_busy`,
+and unreachable servers instead of reporting every timeout as a connection failure.
+
+The HTTP server logs request IDs, duration, search mode, vector engine, stage
+timings, and sanitized failure types through its normal application logger.
+It does not log query text, excerpts, credentials, or client endpoint URLs.
+Responses include the request ID for correlating an incident with server logs.
+
+SSH replication checks destination status before validating or creating a large
+snapshot. An unreachable destination returns retryable deferred status with
+`standby_unreachable` and `destination_preflight`, retaining pending snapshots
+and the last acknowledgement for the next scheduled attempt.

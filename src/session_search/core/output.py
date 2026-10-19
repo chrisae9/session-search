@@ -19,6 +19,9 @@ def bounded_response(response: dict, budget: int = 16384) -> dict:
     def size():
         return len(canonical_json(result).encode())
 
+    # Timing details are optional diagnostics; never evict evidence to retain them.
+    if size() > budget:
+        result.pop('timings_ms', None)
     # Context first drops neighboring events, retaining each requested match.
     while size() > budget:
         removed = False

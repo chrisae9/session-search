@@ -34,6 +34,8 @@ def test_replication_resumes_failed_transfer_and_skips_unchanged_publication(tmp
         if command.startswith('umask'):
             return ''
         parts = shlex.split(command)
+        if parts[-1] == 'status':
+            return json.dumps({'version': 1, 'status': 'ok'})
         if 'replica-capacity' in parts:
             index = parts.index('replica-capacity')
             return json.dumps(capacity(replica, int(parts[index + 1]), int(parts[-1])))
@@ -150,6 +152,8 @@ def test_capacity_deferral_retains_pending_snapshot_and_does_not_upload(tmp_path
         calls.append(arguments)
         assert arguments[0] == 'ssh'
         parts = shlex.split(arguments[-1])
+        if parts[-1] == 'status':
+            return json.dumps({'version': 1, 'status': 'ok'})
         index = parts.index('replica-capacity')
         return json.dumps({'version': 1, 'status': 'deferred', 'reason': 'capacity',
                            'incoming_bytes': int(parts[index + 1]),
@@ -162,7 +166,7 @@ def test_capacity_deferral_retains_pending_snapshot_and_does_not_upload(tmp_path
     manifest = (outbox / 'pending/manifest.json').read_bytes()
     assert publish()['status'] == 'deferred'
     assert (outbox / 'pending/manifest.json').read_bytes() == manifest
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert not (outbox / 'receipt.json').exists()
     with Catalog(primary, readonly=True) as catalog:
         assert catalog.status()['replication']['status'] == 'not_configured'
@@ -176,3 +180,26 @@ def test_capacity_reserve_boundary_and_invalid_sizes(tmp_path, monkeypatch):
     for incoming, reserve in [(-1, 0), (1, -1), (True, 0), (1, '2')]:
         with pytest.raises(ValueError):
             capacity(tmp_path, incoming, reserve)
+
+
+def test_unreachable_destination_skips_expensive_snapshot_work_and_preserves_pending(tmp_path, monkeypatch):
+    from session_search.storage import replication
+    root, outbox = tmp_path / 'primary', tmp_path / 'outbox'
+    with Catalog(root):
+        pass
+    def forbidden(*args, **kwargs):
+        raise AssertionError('offline replica must not create or verify snapshots')
+    monkeypatch.setattr(replication, 'create_snapshot', forbidden)
+    monkeypatch.setattr(replication, 'verify_snapshot', forbidden)
+    def offline(args):
+        assert 'status' in args[-1]
+        raise RuntimeError('transport unavailable')
+    for pending in [False, True]:
+        if pending:
+            (outbox / 'pending').mkdir()
+            (outbox / 'pending/keep').write_text('retained')
+        result = replicate(root, outbox, 'standby', '/replica', '/executable', runner=offline)
+        assert result['reason'] == 'standby_unreachable'
+        assert result['stage'] == 'destination_preflight'
+        if pending:
+            assert (outbox / 'pending/keep').read_text() == 'retained'

@@ -25,10 +25,28 @@ CREATE TABLE IF NOT EXISTS event_chunks (
  event_row INTEGER NOT NULL REFERENCES evidence(row_id), content_hash TEXT NOT NULL,
  chunk_start INTEGER NOT NULL, PRIMARY KEY(event_row,chunk_start)
 );
+CREATE INDEX IF NOT EXISTS event_chunks_by_hash ON event_chunks(content_hash,event_row,chunk_start);
 CREATE TABLE IF NOT EXISTS vectors (
  identity TEXT NOT NULL, content_hash TEXT NOT NULL, vector BLOB NOT NULL,
  PRIMARY KEY(identity,content_hash)
 );
+CREATE TABLE IF NOT EXISTS vector_cache_state (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL);
+INSERT OR IGNORE INTO vector_cache_state VALUES (1,0);
+CREATE TRIGGER IF NOT EXISTS vector_cache_update AFTER UPDATE ON vectors BEGIN
+ UPDATE vector_cache_state SET epoch=epoch+1 WHERE id=1;
+ DELETE FROM semantic_coverage;
+END;
+CREATE TRIGGER IF NOT EXISTS vector_cache_delete AFTER DELETE ON vectors BEGIN
+ UPDATE vector_cache_state SET epoch=epoch+1 WHERE id=1;
+ DELETE FROM semantic_coverage;
+END;
+CREATE TABLE IF NOT EXISTS semantic_coverage (
+ identity TEXT PRIMARY KEY, publication TEXT NOT NULL, indexed_events INTEGER NOT NULL,
+ computed_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS semantic_coverage_insert AFTER INSERT ON vectors BEGIN
+ DELETE FROM semantic_coverage WHERE identity=NEW.identity;
+END;
 CREATE TABLE IF NOT EXISTS embedding_failures (
  identity TEXT NOT NULL, content_hash TEXT NOT NULL, attempts INTEGER NOT NULL,
  next_attempt REAL NOT NULL, error TEXT NOT NULL,
@@ -114,9 +132,12 @@ def _index_pending(catalog: Catalog, provider, *, limit: int) -> dict:
             consecutive_failures += 1
             if consecutive_failures >= 3:
                 break  # Do not hammer an unavailable provider with the entire backlog.
+    refresh_coverage(catalog, identity)
+    from session_search.storage.vector_cache import build
+    cache = build(catalog, provider.identity)
     return {"version": 1, "status": "partial" if failed else "ok",
             "embedded": completed, "failed": failed, "deferred": len(rows) - completed - failed,
-            "identity": identity}
+            "identity": identity, "vector_cache": cache}
 
 
 def hybrid_search(catalog: Catalog, query, provider=None) -> dict:
@@ -137,11 +158,15 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
     # and their evidence while background publication advances the current head.
     catalog.db.execute("BEGIN")
     try:
+        started = time.monotonic()
         lexical = catalog.search(replace(query, limit=max(query.limit, 50)), raw_candidates=True)
+        timings = {"lexical_ms": round((time.monotonic() - started) * 1000, 2)}
         try:
             import numpy as np
+            stage = time.monotonic()
             vector = np.asarray(validate_vector(provider.embed(query.text, query=True),
                                                 provider.identity.dimensions), dtype="<f4")
+            timings["embedding_ms"] = round((time.monotonic() - stage) * 1000, 2)
             has_vectors = catalog.db.execute(
                 "SELECT 1 FROM sqlite_master WHERE name='vectors'"
             ).fetchone()
@@ -154,21 +179,61 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             # Candidate filtering only needs metadata; load transcript text for
             # the final semantic hits below. Older catalogs retain the view path.
             source = metadata_index.event_source() if metadata_index.ready(catalog.db) else "events e"
-            cursor = catalog.db.execute(
-                cte + f"SELECT e.row_id,v.vector,c.chunk_start FROM {source} "
-                "JOIN heads h ON h.session_id=e.session_id AND h.revision=e.revision "
-                "JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision "
-                "JOIN event_chunks c ON c.event_row=e.row_id "
-                "JOIN vectors v ON v.content_hash=c.content_hash WHERE "
-                + " AND ".join(conditions), args,
-            )
+            from session_search.storage.vector_cache import scores as cache_scores
+            stage = time.monotonic()
+            cached = cache_scores(catalog, provider.identity, vector, deadline=started + 20)
+            timings["vector_cache_ms"] = round((time.monotonic() - stage) * 1000, 2)
+            vector_column = "v.vector" if cached is None else "v.rowid AS vector_row"
+            ranked = (cached is not None and not any((query.role, query.after, query.before,
+                      query.project, query.session_id, query.producer, query.sources))
+                      and catalog.db.execute("SELECT 1 FROM sqlite_master WHERE name='event_chunks_by_hash'").fetchone())
+            if ranked:
+                batches = ranked_batches(catalog, cached, source, cte, conditions, args)
+            else:
+                cursor = catalog.db.execute(
+                    cte + f"SELECT e.row_id,{vector_column},c.chunk_start FROM {source} "
+                    "JOIN heads h ON h.session_id=e.session_id AND h.revision=e.revision "
+                    "JOIN revisions r ON r.session_id=e.session_id AND r.revision=e.revision "
+                    "JOIN event_chunks c ON c.event_row=e.row_id "
+                    "JOIN vectors v ON v.content_hash=c.content_hash WHERE "
+                    + " AND ".join(conditions), args,
+                )
+                batches = ((rows, None) for rows in iter(lambda: cursor.fetchmany(256), []))
+            stage = time.monotonic()
             best: dict[int, tuple[float, int]] = {}
             semantic_overflow = False
-            while rows := cursor.fetchmany(256):
-                matrix = np.stack([np.frombuffer(row["vector"], dtype="<f4") for row in rows])
-                if matrix.shape[1] != provider.identity.dimensions or not np.isfinite(matrix).all():
-                    raise ValueError("stored embedding is incompatible or corrupt")
-                scores = matrix @ vector
+            for rows, frontier in batches:
+                if not rows:
+                    if semantic_overflow and len(best) >= SEMANTIC_CANDIDATES:
+                        cutoff = heapq.nlargest(SEMANTIC_CANDIDATES, (v[0] for v in best.values()))[-1]
+                        if frontier < cutoff:
+                            break
+                    continue
+                if time.monotonic() > started + 20:
+                    from session_search.core.deadlines import SearchDeadline
+                    raise SearchDeadline()
+                if cached is None:
+                    matrix = np.stack([np.frombuffer(row["vector"], dtype="<f4") for row in rows])
+                    if matrix.shape[1] != provider.identity.dimensions or not np.isfinite(matrix).all():
+                        raise ValueError("stored embedding is incompatible or corrupt")
+                    scores = matrix @ vector
+                else:
+                    ids, values = cached
+                    wanted = np.asarray([row["vector_row"] for row in rows], dtype='<i8')
+                    positions = np.searchsorted(ids, wanted)
+                    valid = positions < len(ids)
+                    valid[valid] &= ids[positions[valid]] == wanted[valid]
+                    scores = np.empty(len(rows), dtype='<f4')
+                    scores[valid] = values[positions[valid]]
+                    # A missing segment cannot hide evidence: resolve any missing
+                    # IDs from the authoritative snapshot instead.
+                    for index in np.flatnonzero(~valid):
+                        data = catalog.db.execute('SELECT vector FROM vectors WHERE rowid=?',
+                                                  (int(wanted[index]),)).fetchone()[0]
+                        stored = np.frombuffer(data, dtype='<f4')
+                        if len(stored) != provider.identity.dimensions or not np.isfinite(stored).all():
+                            raise ValueError("stored embedding is incompatible or corrupt")
+                        scores[index] = stored @ vector
                 for row, score in zip(rows, scores):
                     key = row["row_id"]
                     candidate = (float(score), row["chunk_start"])
@@ -183,6 +248,8 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
                         SEMANTIC_CANDIDATES, best.items(),
                         key=lambda item: (item[1][0], -item[0]),
                     ))
+            timings["vector_candidates_ms"] = round((time.monotonic() - stage) * 1000, 2)
+            lexical["vector_engine"] = "sqlite" if cached is None else "exact_mmap_ranked" if ranked else "exact_mmap"
             semantic = []
             for row_id, (score, start) in sorted(
                 best.items(), key=lambda pair: (-pair[1][0], pair[0])
@@ -210,26 +277,89 @@ def _hybrid_search(catalog: Catalog, query, provider) -> dict:
             lexical["embedding_identity"] = provider.identity.key
             lexical["more_matches"] = (lexical["more_matches"] or semantic_overflow
                                        or len(ordered) > query.limit)
-            # Match presence through the vector key index. Stored vectors are
-            # NOT NULL, so a missing joined key is exactly a missing vector;
-            # reading the payload here would add unnecessary table lookups.
-            lexical["coverage"]["semantic_indexed"] = catalog.db.execute(
+            # Global coverage is maintained by the background worker, not scanned
+            # across the entire corpus as part of an interactive request.
+            lexical["coverage"].update(cached_coverage(catalog, provider.identity.key))
+        except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+            lexical.update(mode="keyword", degraded=True, degradation="TimeoutError" if isinstance(exc, TimeoutError) else type(exc).__name__)
+            reason = getattr(exc, 'reason', None)
+            if reason in {'local_inference_busy', 'local_inference_execution_limit',
+                          'local_startup_timeout', 'local_query_timeout', 'search_deadline'}:
+                lexical['degradation_reason'] = reason
+            lexical["more_matches"] = (lexical["more_matches"]
+                                       or len(lexical["results"]) > query.limit)
+            lexical["results"] = rank_results(query, lexical["results"])[:query.limit]
+        timings["total_ms"] = round((time.monotonic() - started) * 1000, 2)
+        lexical["timings_ms"] = timings
+        return lexical
+    finally:
+        catalog.db.rollback()
+
+
+def cached_coverage(catalog, identity):
+    if catalog.db.execute("SELECT 1 FROM sqlite_master WHERE name='semantic_coverage'").fetchone():
+        row = catalog.db.execute('SELECT publication,indexed_events,computed_at FROM semantic_coverage WHERE identity=?',
+                                 (identity,)).fetchone()
+        if row:
+            return {"semantic_indexed": row["indexed_events"],
+                    "semantic_coverage_status": "current" if row["publication"] == catalog.publication() else "stale",
+                    "semantic_coverage_computed_at": row["computed_at"]}
+    return {"semantic_indexed": None, "semantic_coverage_status": "not_computed"}
+
+
+def refresh_coverage(catalog, identity):
+    if cached_coverage(catalog, identity).get('semantic_coverage_status') == 'current':
+        return
+    catalog.db.execute('BEGIN')
+    try:
+        observed = catalog.publication()
+        indexed = catalog.db.execute(
                 "SELECT COUNT(DISTINCT a.event_row) FROM active_events a JOIN heads h "
                 "ON h.session_id=a.session_id "
                 "WHERE EXISTS(SELECT 1 FROM event_chunks c WHERE c.event_row=a.event_row) "
                 "AND NOT EXISTS(SELECT 1 FROM event_chunks c LEFT JOIN vectors v "
                 "ON v.content_hash=c.content_hash AND v.identity=? "
-                "WHERE c.event_row=a.event_row AND v.content_hash IS NULL)", (provider.identity.key,),
+                "WHERE c.event_row=a.event_row AND v.content_hash IS NULL)", (identity,),
             ).fetchone()[0]
-        except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
-            lexical.update(mode="keyword", degraded=True, degradation="TimeoutError" if isinstance(exc, TimeoutError) else type(exc).__name__)
-            reason = getattr(exc, 'reason', None)
-            if reason in {'local_inference_busy', 'local_inference_execution_limit',
-                          'local_startup_timeout', 'local_query_timeout'}:
-                lexical['degradation_reason'] = reason
-            lexical["more_matches"] = (lexical["more_matches"]
-                                       or len(lexical["results"]) > query.limit)
-            lexical["results"] = rank_results(query, lexical["results"])[:query.limit]
-        return lexical
+
     finally:
         catalog.db.rollback()
+    catalog.db.execute('BEGIN IMMEDIATE')
+    try:
+        if catalog.publication() == observed:
+            catalog.bump_publication()
+            observed = catalog.publication()
+        catalog.db.execute("INSERT OR REPLACE INTO semantic_coverage VALUES (?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                           (identity, observed, indexed))
+        catalog.db.commit()
+    except BaseException:
+        catalog.db.rollback()
+        raise
+
+
+def ranked_batches(catalog, cached, source, cte, conditions, args):
+    """Visit exact global scores in order, applying all evidence filters in SQL.
+
+    The caller stops only below the proven top-event cutoff, including every tie.
+    Selective queries retain the direct scoped-join path instead.
+    """
+    import numpy as np
+    ids, values = cached
+    order = np.argsort(-values, kind='stable')
+    for start in range(0, len(order), 512):
+        selected = order[start:start + 512]
+        placeholders = ','.join('?' for _ in selected)
+        cursor = catalog.db.execute(
+            cte + f"SELECT e.row_id,v.rowid AS vector_row,c.chunk_start FROM vectors v NOT INDEXED "
+            "CROSS JOIN event_chunks c INDEXED BY event_chunks_by_hash "
+            f"CROSS JOIN {source} CROSS JOIN heads h CROSS JOIN revisions r WHERE "
+            "c.content_hash=v.content_hash AND e.row_id=c.event_row "
+            "AND h.session_id=e.session_id AND h.revision=e.revision "
+            "AND r.session_id=e.session_id AND r.revision=e.revision AND "
+            + ' AND '.join(conditions) + f' AND v.rowid IN ({placeholders})',
+            (*args, *(int(value) for value in ids[selected])),
+        )
+        while rows := cursor.fetchmany(256):
+            yield rows, None
+        end = start + len(selected)
+        yield [], float(values[order[end]]) if end < len(order) else float('-inf')

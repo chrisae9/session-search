@@ -8,6 +8,9 @@ import hmac
 import json
 import asyncio
 import threading
+import logging
+import time
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -15,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from session_search.core.output import bounded_response
 from session_search.core.protocol import MAX_REQUEST, MAX_REVISION_UPLOAD
-from session_search.core.records import Event, SearchQuery, SessionRevision
+from session_search.core.records import Event, SearchQuery, SessionRevision, canonical_json
 from session_search.storage.catalog import Catalog
 from session_search.storage.fencing import WriteFenced
 
@@ -169,18 +172,35 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
             return {"version": 1, "status": "ok", "coverage": catalog.status(),
                     "server_role": "standby" if readonly else "primary"}
 
-    def run_search(query, budget):
-        from session_search.storage.semantic import hybrid_search
-        with read() as catalog:
-            return bounded_response(hybrid_search(catalog, query, provider), budget)
+    def run_search(query, budget, request_id):
+        started = time.monotonic()
+        record = {"operation": "search", "request_id": request_id, "literal": query.literal}
+        try:
+            from session_search.storage.semantic import hybrid_search
+            with read() as catalog:
+                result = hybrid_search(catalog, query, provider)
+            result['request_id'] = request_id
+            record.update(status=result.get('status'), mode=result.get('mode'),
+                          vector_engine=result.get('vector_engine'), timings_ms=result.get('timings_ms'),
+                          degradation_reason=result.get('degradation_reason'))
+            return bounded_response(result, budget)
+        except Exception as exc:
+            record.update(status='error', error_type=type(exc).__name__)
+            raise
+        finally:
+            record['elapsed_ms'] = round((time.monotonic() - started) * 1000, 2)
+            # Deliberately omit query text, evidence, headers, URLs, and producer.
+            logging.getLogger('uvicorn.error').info(canonical_json(record))
 
     @app.post("/v1/search")
     async def search(data: dict, request: Request):
         budget = data.pop("budget", 16384)
         query = SearchQuery(**data)
         try:
-            return await search_pool.run(run_search, query, budget)
+            return await search_pool.run(run_search, query, budget, uuid.uuid4().hex)
         except SearchBusy:
+            logging.getLogger('uvicorn.error').warning(canonical_json({
+                'operation': 'search', 'status': 'unavailable', 'reason': 'search_busy'}))
             return JSONResponse({'version': 1, 'status': 'unavailable', 'reason': 'search_busy'},
                                 status_code=503, headers={'Retry-After': '1'})
 

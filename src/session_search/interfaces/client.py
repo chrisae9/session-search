@@ -20,8 +20,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class RemoteError(Exception):
-    def __init__(self, status: int | None):
+    def __init__(self, status: int | None, *, reason: str = "connection_error"):
         self.status = status
+        self.reason = reason
         super().__init__(f"remote request failed ({status or 'connection'})")
 
 
@@ -79,15 +80,26 @@ class Client:
                     raise RemoteError(502)
                 return result
         except urllib.error.HTTPError as exc:
-            raise RemoteError(exc.code) from None
-        except (urllib.error.URLError, TimeoutError, ConnectionError):
-            raise RemoteError(None) from None
+            reason = "server_error"
+            if exc.code == 503:
+                try:
+                    body = json.loads(exc.read(65537))
+                    if body.get("reason") == "search_busy":
+                        reason = "search_busy"
+                except (OSError, ValueError, AttributeError):
+                    pass
+            raise RemoteError(exc.code, reason=reason) from None
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            cause = getattr(exc, 'reason', exc)
+            raise RemoteError(None, reason="read_timeout" if isinstance(cause, TimeoutError)
+                              else "connection_error") from None
         except (ValueError, UnicodeError):
             raise RemoteError(502) from None
 
     def read(self, operation: str, payload: dict | None = None) -> dict:
         if operation not in {"search", "context", "status"}:
             raise ValueError("unsupported read operation")
+        failures = []
         for index, endpoint in enumerate(filter(None, (self.primary, self.standby))):
             try:
                 response = self._request(endpoint, "/v1/" + operation, payload)
@@ -96,7 +108,12 @@ class Client:
             except RemoteError as exc:
                 if exc.status not in {None, 500, 502, 503, 504}:
                     raise
-        return {"version": 1, "status": "unavailable", "reason": "search_servers_unreachable"}
+                failures.append({"server": "standby" if index else "primary",
+                                 "reason": exc.reason, "http_status": exc.status})
+        reason = ("search_timeout" if any(f['reason'] == 'read_timeout' for f in failures)
+                  else "search_busy" if any(f['reason'] == 'search_busy' for f in failures)
+                  else "search_servers_unreachable")
+        return {"version": 1, "status": "unavailable", "reason": reason, "failures": failures}
 
     def upload(self, payload: dict) -> dict:
         # No alternate destination: a standby never becomes a writer implicitly.

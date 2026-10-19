@@ -102,11 +102,6 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
         if receipt and any(receipt['destination'][name] != destination[name] for name in ('host', 'data')):
             raise ValueError('replication outbox belongs to another destination')
         pending = outbox / 'pending'
-        if pending.exists() and receipt:
-            previous = verify_snapshot(pending)
-            if previous['snapshot'] == receipt['snapshot']:
-                shutil.rmtree(pending)
-                sync_directory(outbox)
         with Catalog(source.resolve(), readonly=True) as catalog:
             publication = catalog.publication()
             if publication is None:
@@ -115,17 +110,32 @@ def replicate(source: Path, outbox: Path, host: str, remote_data: str,
                 record_acknowledgement(source, receipt)
                 return {'version': 1, 'status': 'up_to_date', **receipt}
             if not pending.exists():
-                # SQLite backup may grow while readers and writers coexist. Leave
-                # room for another catalog-sized allocation plus the reserve.
                 needed = 2 * sum(p.stat().st_size for p in catalog.root.glob('catalog.sqlite3*')
                                  if p.is_file())
                 available = capacity(outbox, needed, reserve_bytes)
                 if available['status'] != 'ready':
                     return {**available, 'stage': 'source_snapshot'}
+        ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host]
+        # A sleeping laptop must not trigger multi-gigabyte snapshot construction
+        # or verification before its availability is established.
+        try:
+            response = json.loads(runner([*ssh, shlex.join([
+                remote_executable, '--data-dir', remote_data, 'status'])]))
+        except RuntimeError:
+            return {'version': 1, 'status': 'deferred', 'reason': 'standby_unreachable',
+                    'stage': 'destination_preflight', 'retryable': True}
+        if response.get('version') != 1 or response.get('status') != 'ok':
+            raise ValueError('standby did not acknowledge the availability preflight')
+        if pending.exists() and receipt:
+            previous = verify_snapshot(pending)
+            if previous['snapshot'] == receipt['snapshot']:
+                shutil.rmtree(pending)
+                sync_directory(outbox)
+        if not pending.exists():
+            with Catalog(source.resolve(), readonly=True) as catalog:
                 create_snapshot(catalog, pending, search_only=True)
         verified = verify_snapshot(pending)
         incoming = remote_data.rstrip('/') + '/incoming/' + verified['snapshot']
-        ssh = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host]
         incoming_bytes = sum(p.stat().st_size for p in pending.rglob('*') if p.is_file())
         output = runner([*ssh, shlex.join([remote_executable, '--data-dir', remote_data,
                         'replica-capacity', str(incoming_bytes), '--reserve-bytes', str(reserve_bytes)])])
