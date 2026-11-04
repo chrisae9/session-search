@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from session_search.core.records import canonical_json
-from session_search.storage.objects import sync_directory
+from session_search.storage.objects import SourceChangedError, sync_directory
 
 CHUNK_SIZE = 4 * 1024 * 1024
 MAX_SIZE = 32 * 1024 ** 3
@@ -92,7 +92,7 @@ class ChunkStore:
             after = os.fstat(stream.fileno())
             if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
                     after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-                raise ValueError('raw source changed while chunking')
+                raise SourceChangedError('raw source changed while chunking')
         key = hasher.hexdigest()
         if expected_digest is not None and key != expected_digest:
             raise ValueError('raw file checksum mismatch')
