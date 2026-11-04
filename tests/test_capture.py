@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from session_search.capture.local import capture_file, capture_home
 from session_search.core.records import SearchQuery
 from session_search.storage.catalog import Catalog
@@ -157,3 +159,62 @@ def test_chunk_capture_requires_raw_archival_even_without_sessions(tmp_path):
         with pytest.raises(ValueError, match="requires archive_raw"):
             capture_home(queue, tmp_path / "absent", "device", chunk_raw=True)
         assert not list((queue.root / "objects").glob("**/recipes/*/*"))
+
+
+@pytest.mark.parametrize('client', [False, True])
+def test_chunk_source_change_preserves_checkpoint_and_retries(tmp_path, monkeypatch, client):
+    from session_search.capture.queue import UploadQueue
+    from session_search.storage.chunks import ChunkStore
+
+    path = tmp_path / 'example.jsonl'
+    path.write_text(rollout('retained evidence'))
+    store = UploadQueue(tmp_path / 'queue') if client else Catalog(tmp_path / 'catalog')
+    with store:
+        capture_file(store, path, 'device', archive_raw=True, chunk_raw=True)
+        previous = store.fingerprint(str(path))
+        citation = None if client else store.search(SearchQuery('retained'))['results'][0]['citation']
+        path.write_text(rollout('updated evidence'))
+        publish = ChunkStore._publish
+        changed = False
+
+        def append_during_archive(self, destination, content):
+            nonlocal changed
+            publish(self, destination, content)
+            if not changed:
+                changed = True
+                with path.open('a') as stream:
+                    stream.write('{}\n')
+
+        with monkeypatch.context() as patch:
+            patch.setattr(ChunkStore, '_publish', append_during_archive)
+            result = capture_file(store, path, 'device', archive_raw=True, chunk_raw=True)
+        assert result == {'status': 'changed_during_read', 'retryable': True}
+        assert store.fingerprint(str(path)) == previous
+        if client:
+            assert store.status()['pending'] == 1
+        else:
+            assert store.context([citation])['results'][0]['events'][0]['text'] == 'retained evidence'
+            assert not store.search(SearchQuery('updated'))['results']
+        assert capture_file(store, path, 'device', archive_raw=True, chunk_raw=True)['status'] == 'captured'
+        assert store.fingerprint(str(path)) != previous
+        if client:
+            assert store.status()['pending'] == 2
+        else:
+            assert store.search(SearchQuery('updated'))['results']
+            assert store.context([citation])['results'][0]['events'][0]['text'] == 'retained evidence'
+
+
+def test_stable_chunk_corruption_still_fails_capture(tmp_path):
+    import hashlib
+    from session_search.storage.chunks import ChunkStore
+
+    path = tmp_path / 'example.jsonl'
+    path.write_text(rollout('uncommitted evidence'))
+    with Catalog(tmp_path / 'catalog') as catalog:
+        chunk = ChunkStore(catalog.root).path('chunks', hashlib.sha256(path.read_bytes()).hexdigest())
+        chunk.parent.mkdir(parents=True)
+        chunk.write_bytes(b'corrupt synthetic chunk')
+        with pytest.raises(ValueError, match='existing chunk-store object is corrupt'):
+            capture_file(catalog, path, 'device', archive_raw=True, chunk_raw=True)
+        assert catalog.fingerprint(str(path)) is None
+        assert catalog.status()['sessions'] == 0

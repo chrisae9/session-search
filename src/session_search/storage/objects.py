@@ -9,6 +9,10 @@ import tempfile
 from pathlib import Path
 
 
+class SourceChangedError(ValueError):
+    """The raw source changed before an immutable object could be published."""
+
+
 def sync_directory(path: Path):
     fd = os.open(path, os.O_RDONLY)
     try:

@@ -149,8 +149,12 @@ def _capture_file(catalog: Catalog, path: Path, producer: str, *, archive_raw: b
             session = normalize_session(parsed)
         raw = None
         if archive_raw:
-            from session_search.storage.objects import ObjectStore
-            raw = {**ObjectStore(catalog.root).put(path, chunked=chunk_raw), "path": str(path), "fingerprint": before}
+            from session_search.storage.objects import ObjectStore, SourceChangedError
+            try:
+                archived = ObjectStore(catalog.root).put(path, chunked=chunk_raw)
+            except SourceChangedError:
+                return {"status": "changed_during_read", "retryable": True}
+            raw = {**archived, "path": str(path), "fingerprint": before}
             if fingerprint(path) != before:
                 return {"status": "changed_during_read", "retryable": True}
         receipt = catalog.ingest(
