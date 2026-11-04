@@ -19,7 +19,7 @@ session-search = "session_search.interfaces.cli:main"
 
 [project.optional-dependencies]
 server = ["fastapi>=0.115", "uvicorn>=0.34"]
-mcp = ["mcp>=1.12,<2"]
+mcp = ["mcp>=1.30.0,<2"]
 embeddings = ["numpy>=1.26"]
 local = ["llama-cpp-python>=0.3.35", "numpy>=1.26"]
 
