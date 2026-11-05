@@ -9,17 +9,27 @@ import socket
 import tempfile
 import time
 
-from session_search.core.embeddings import EmbeddingIdentity, LocalEmbedder
-from session_search.core.records import Event, SearchQuery, SessionRevision
-from session_search.storage.catalog import Catalog
-from session_search.storage.semantic import hybrid_search, index_pending
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=Path)
     parser.add_argument('sha256')
     args = parser.parse_args()
+    import diskcache
+    from unittest.mock import patch
+
+    # GHSA-w8v5-vhqr-4h9v remains unpatched. Exercise the real native
+    # embedding/retrieval path while rejecting the backend's disk-cache entry point.
+    with patch.object(diskcache, 'Cache', side_effect=AssertionError(
+            'local embedding qualification must not open diskcache')) as cache:
+        qualify(args, cache)
+
+
+def qualify(args, cache):
+    from session_search.core.embeddings import EmbeddingIdentity, LocalEmbedder
+    from session_search.core.records import Event, SearchQuery, SessionRevision
+    from session_search.storage.catalog import Catalog
+    from session_search.storage.semantic import hybrid_search, index_pending
+
     # A refused connection is insufficient: require the OS to deny networking.
     with socket.socket() as probe:
         try:
@@ -32,6 +42,7 @@ def main():
     start = time.monotonic()
     vector = provider.embed('recover a lost computer', query=True)
     assert len(vector) == 1024
+    assert provider.model.cache is None, 'persistent inference caching must remain disabled'
     assert len(provider.embed('transport repair ' * 350)) == 1024
     try:
         provider.embed('transport repair ' * 10000)
@@ -52,8 +63,11 @@ def main():
             assert found['results'][0]['citation']['session_id'] == 'recovery'
             cite = found['results'][0]['citation']
             assert catalog.context([cite])['results'][0]['events']
+    cache.assert_not_called()
     print(json.dumps({'status': 'verified', 'model_sha256': args.sha256,
                       'dimensions': len(vector), 'network_denied_by_os': True,
+                      'diskcache_constructor_calls': cache.call_count,
+                      'persistent_inference_cache': False,
                       'seconds': round(time.monotonic() - start, 3),
                       'peak_rss_platform_units': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}))
 

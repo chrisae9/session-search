@@ -40,6 +40,9 @@ or Linux native inference. The native checks establish operation, not retrieval
 quality on a representative corpus. Use targeted tests while developing, then
 run the relevant full checks before submitting changes.
 
+See [dependency security](docs/dependency-security.md) for the unpatched optional
+DiskCache advisory, current call-path boundary, and native qualification guard.
+
 ## Where to work
 
 | Area | Source | Tests and examples |
