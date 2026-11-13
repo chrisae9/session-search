@@ -395,12 +395,17 @@ search_by_default = true
 
 [providers.pi-legacy]
 search_by_default = true
+
+[providers.hermes]
+capture_enabled = true
+search_by_default = true
 ```
 
-Without a provider config, capture remains Codex-only. With a config, an omitted
-provider or omitted `capture_enabled` is disabled. `--pi-home` selects the Pi agent
+Without a provider config, Codex and Hermes capture are enabled. With a config,
+Hermes stays enabled unless explicitly disabled; Codex and Pi require
+`capture_enabled = true`. `--pi-home` selects the Pi agent
 directory containing `sessions`; its default is the user's `.pi/agent` directory.
-Both sources share the sync byte budget, upload queue, and retry behavior. The sync
+Enabled sources share the sync byte budget, upload queue, and retry behavior. The sync
 receipt reports counts and errors for each provider. Disabling capture preserves
 previously indexed history.
 
@@ -419,7 +424,7 @@ Set a provider's `search_by_default = false` and apply the configuration to excl
 are unchanged. Other sources remain searchable unless explicitly disabled.
 `pi-legacy` has no live capture provider; only its search default is configurable.
 
-CLI `search --source pi` or MCP `search(sources=["pi"])` explicitly overrides the
+CLI `search --source pi` or MCP `search(sources=["hermes"])` explicitly overrides the
 defaults. Repeat `--source` or supply multiple source names to search a selection;
 `--all-sources` / `all_sources=true` searches every source. An explicit source list
 and all-sources flag are mutually exclusive. Filters apply before keyword and
@@ -436,6 +441,40 @@ when a later capture changes the active branch. Pi uses full parsing of changed
 files; Codex's incremental parser is unchanged. Pi raw files are never candidates
 for the Codex offload workflow unless incorrectly placed inside the Codex source
 root. Keep source directories separate.
+
+### Hermes capture
+
+Hermes capture looks for `state.db` under `HERMES_HOME` or, if unset, the
+user's `.hermes` directory. A missing database is skipped. Other profiles
+are not scanned automatically. Repeat `--hermes-db PROFILE=PATH` to replace
+discovery with an explicit list. For a local pilot, use a temporary catalog
+and a TOML file containing only the Hermes provider:
+
+```sh
+session-search --data-dir DATA --providers-config PROVIDERS.toml capture \
+  --producer DEVICE --hermes-db 'default=/path/to/hermes/state.db' --max-bytes 16777216
+```
+
+`sync` takes the same `--hermes-db PROFILE=PATH` option. Keep the producer and
+profile labels stable across runs. The reader uses short read-only SQLite
+transactions and publishes changed text revisions. Hermes capture does not
+archive raw files, even when `--archive-raw` is used for other sources. It does
+not import JSONL exports, tool payloads, hidden reasoning, or attachments.
+Visible messaging sessions and the canonical local Bot Chat are included from
+the profiles you select. Other hidden sessions and internal sessions are
+excluded. In-place compaction is supported; history
+that spans a compression rotation is deferred rather than stitched together.
+If a previously captured session becomes hidden, internal, or part of an
+unsupported rotation, its current search head is cleared; older citations
+still resolve. A missing database or session is not treated as a withdrawal.
+The first version admits up to 1,000 sessions per profile and up to 20,000
+user or assistant rows or 8 MiB of selected text per session. Over-limit work
+is reported as partial capture; it does not publish a truncated revision.
+
+Captured Hermes sessions appear in ordinary searches by default. Apply
+`search_by_default = false` on the primary to exclude them from ordinary
+queries. Explicit Hermes searches and existing citations still work. To stop
+new capture, disable it on the producer; existing evidence is retained.
 
 
 ### Pi sessions without saved history

@@ -6,6 +6,39 @@ import stat
 from datetime import datetime
 from pathlib import Path
 
+from session_search.core.providers import LIVE_CAPTURE_PROVIDERS
+
+
+CAPTURE_STATES = frozenset({'complete', 'partial', 'empty', 'unavailable'})
+
+
+def _capture_counts(value: dict) -> dict:
+    counts = value.get('counts', {})
+    if not isinstance(counts, dict):
+        raise ValueError('invalid capture counts')
+    result = {key: counts[key] for key in ('captured', 'unchanged', 'deferred', 'changed_during_read')
+              if key in counts}
+    if any(type(count) is not int or count < 0 for count in result.values()):
+        raise ValueError('invalid capture counts')
+    return result
+
+
+def _capture_error_count(value: dict) -> int:
+    errors = value.get('errors', [])
+    if not isinstance(errors, list):
+        raise ValueError('invalid capture errors')
+    return len(errors)
+
+
+def _provider_summary(data: dict) -> dict:
+    if not isinstance(data, dict) or data['status'] not in CAPTURE_STATES | {'disabled'}:
+        raise ValueError('invalid provider capture summary')
+    discovered = data.get('discovered', 0)
+    if type(discovered) is not int or discovered < 0:
+        raise ValueError('invalid provider discovery count')
+    return {'status': data['status'], 'counts': _capture_counts(data),
+            'discovered': discovered, 'capture_error_count': _capture_error_count(data)}
+
 
 def with_outage_capture_status(result: dict, root: Path) -> dict:
     """Keep a search outage distinct from missing local capture or pending work."""
@@ -51,22 +84,14 @@ def capture_status(root: Path) -> dict:
         if len(content) > 1024 * 1024:
             raise ValueError('oversized sync receipt')
         value = json.loads(content)
-        if value['version'] != 1 or value['status'] not in {'complete', 'partial', 'empty', 'unavailable'}:
+        if value['version'] != 1 or value['status'] not in CAPTURE_STATES:
             raise ValueError('invalid sync receipt')
         completed = datetime.fromisoformat(value['completed_at'])
         if completed.tzinfo is None:
             raise ValueError('sync receipt requires a timezone')
         capture = value['capture']
-        counts = capture.get('counts', {})
-        summary = {key: counts[key] for key in ('captured', 'unchanged', 'deferred', 'changed_during_read')
-                   if key in counts}
-        if any(type(count) is not int or count < 0 for count in summary.values()):
-            raise ValueError('invalid capture counts')
-        errors = capture.get('errors', [])
-        if not isinstance(errors, list):
-            raise ValueError('invalid capture errors')
         result = {'status': value['status'], 'completed_at': completed.isoformat(),
-                'counts': summary, 'capture_error_count': len(errors),
+                'counts': _capture_counts(capture), 'capture_error_count': _capture_error_count(capture),
                 'backlog_deferred': capture.get('reason') == 'backlog_byte_budget'}
         if 'parser' in capture:
             parser = capture['parser']
@@ -79,12 +104,9 @@ def capture_status(root: Path) -> dict:
             result['parser'] = selected
         if 'providers' in capture:
             providers = capture['providers']
-            if not isinstance(providers, dict) or set(providers) - {'codex', 'pi'}:
+            if not isinstance(providers, dict) or set(providers) - LIVE_CAPTURE_PROVIDERS:
                 raise ValueError('invalid provider capture summary')
-            result['providers'] = {name: {'status': data['status'],
-                'counts': data.get('counts', {}), 'discovered': data.get('discovered', 0),
-                'capture_error_count': len(data.get('errors', []))}
-                for name, data in providers.items()}
+            result['providers'] = {name: _provider_summary(data) for name, data in providers.items()}
         return result
     except FileNotFoundError:
         return {'status': 'not_observed'}

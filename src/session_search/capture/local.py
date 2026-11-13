@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import shutil
+import sqlite3
 import tempfile
-from contextlib import nullcontext
+import uuid
+from collections import Counter
+from contextlib import contextmanager, nullcontext
+from dataclasses import asdict
 from pathlib import Path
 
 from session_search.capture.parsers.base import redact_sensitive_text
@@ -220,11 +225,102 @@ def capture_home(catalog: Catalog, home: Path, producer: str, *, archive_raw: bo
             "parser": parser_counts}
 
 
-def capture_providers(catalog, home, producer, *, pi_home=None, providers_config=None, **options):
+def hermes_inputs(settings, selections):
+    if not settings.get("hermes", {}).get("capture_enabled", False):
+        return {}
+    if not selections:
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+        database = home / "state.db"
+        if not database.is_file():
+            return {}
+        # HERMES_HOME can point directly at a named profile.
+        profile = home.name if home.parent.name == "profiles" else "default"
+        return {profile: database.resolve()}
+    inputs = {}
+    for selection in selections:
+        profile, separator, path = selection.partition("=")
+        if (not separator or not profile or len(profile) > 64 or not path
+                or any(not (c.isascii() and (c.isalnum() or c in "-_.")) for c in profile)):
+            raise ValueError("invalid --hermes-db; expected PROFILE=PATH")
+        database = Path(path).expanduser().resolve()
+        if profile in inputs or database in inputs.values():
+            raise ValueError("duplicate Hermes profile or database selection")
+        inputs[profile] = database
+    return inputs
+
+
+@contextmanager
+def _hermes_capture_guard(catalog):
+    if hasattr(catalog, "capture_guard"):
+        with catalog.capture_guard():
+            yield
+    else:
+        with (catalog.root / ".hermes-capture.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+
+def capture_hermes(catalog, inputs, producer, *, max_bytes=None,
+                   reserve_bytes=64 * 1024 * 1024, force=False):
+    from session_search.capture.hermes import HermesReadError, iter_hermes_revisions
+
+    if type(reserve_bytes) is not int or reserve_bytes < 0:
+        raise ValueError("capture reserve must be a nonnegative byte count")
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
+        raise ValueError("capture byte budget must be nonnegative")
+    counts = Counter()
+    errors = []
+    deferrals = Counter()
+    discovered = admitted = 0
+    local = isinstance(catalog, Catalog)
+
+    def deferred(reason):
+        counts["deferred"] += 1
+        deferrals[reason] += 1
+
+    with _hermes_capture_guard(catalog):
+        for profile, database in inputs.items():
+            try:
+                for session in iter_hermes_revisions(database, producer=producer, profile=profile,
+                                                     on_deferred=deferred,
+                                                     is_known=lambda key: catalog.fingerprint(key) is not None):
+                    discovered += 1
+                    checkpoint = session.session_id
+                    revision = session.revision
+                    if not force and catalog.fingerprint(checkpoint) == revision:
+                        counts["unchanged"] += 1
+                        continue
+                    # Include space for queue envelope and transient database writes.
+                    size = len(canonical_json(asdict(session)).encode()) + 1024
+                    if max_bytes is not None and admitted + size > max_bytes:
+                        deferred("capture_byte_budget")
+                        continue
+                    if shutil.disk_usage(catalog.root).free < size * 3 + reserve_bytes:
+                        deferred("insufficient_staging_space")
+                        continue
+                    catalog.ingest(session, producer=producer, request_id=uuid.uuid4().hex,
+                                   checkpoint=(checkpoint, revision),
+                                   **({"reactivate": True} if local else {}))
+                    admitted += size
+                    counts["captured"] += 1
+            except (HermesReadError, OSError, sqlite3.Error) as exc:
+                errors.append({"source_id": digest(profile.encode()), "error": type(exc).__name__,
+                               "reason": exc.reason if isinstance(exc, HermesReadError) else "read_failed",
+                               "retryable": True})
+    return {"version": 1, "status": "partial" if errors or counts["deferred"] else
+            "complete" if discovered else "empty", "counts": dict(counts), "errors": errors,
+            "deferrals": dict(deferrals),
+            "discovered": discovered, "raw_archival_enabled": False, "admitted_source_bytes": admitted,
+            "parser": {"full": discovered, "incremental": 0, "reused_events": 0, "checkpoints_saved": 0}}
+
+
+def capture_providers(catalog, home, producer, *, pi_home=None, hermes_dbs=None,
+                      providers_config=None, **options):
     from session_search.core.providers import load_providers
     settings = load_providers(providers_config)
-    # Preserve the existing result shape and behavior for installations without config.
-    if providers_config is None:
+    inputs = hermes_inputs(settings, hermes_dbs)
+    # Preserve the existing receipt on hosts without Hermes or a provider config.
+    if providers_config is None and not inputs:
         return capture_home(catalog, home, producer, **options)
     remaining = options.pop("max_bytes", None)
     results = {}
@@ -236,6 +332,17 @@ def capture_providers(catalog, home, producer, *, pi_home=None, providers_config
                                        max_bytes=remaining, **options)
         if remaining is not None:
             remaining = max(0, remaining - results[source]["admitted_source_bytes"])
+    if inputs:
+        results["hermes"] = capture_hermes(
+            catalog, inputs, producer, max_bytes=remaining,
+            reserve_bytes=options.get("reserve_bytes", 64 * 1024 * 1024),
+            force=options.get("force", False),
+        )
+    elif settings.get("hermes", {}).get("capture_enabled", False):
+        results["hermes"] = {"status": "empty", "counts": {}, "parser": {}, "errors": [],
+                             "discovered": 0, "admitted_source_bytes": 0}
+    else:
+        results["hermes"] = {"status": "disabled"}
     enabled = [v for v in results.values() if v["status"] != "disabled"]
     counts = {}
     parser = {"full": 0, "incremental": 0, "reused_events": 0, "checkpoints_saved": 0}
