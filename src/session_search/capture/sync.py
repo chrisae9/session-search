@@ -33,6 +33,7 @@ def sync_once(root: Path, home: Path, producer: str, *, client=None,
               max_bytes: int, max_pending_bytes: int | None = None,
               reserve_bytes: int = 2 * 1024 ** 3, archive_raw=False, chunk_raw=False, incremental=False,
               flush_limit: int = 100, pi_home: Path | None = None,
+              hermes_dbs: list[str] | None = None,
               providers_config: Path | None = None) -> dict:
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError('sync requires a positive capture byte budget')
@@ -55,7 +56,7 @@ def sync_once(root: Path, home: Path, producer: str, *, client=None,
             return {'version': 1, 'status': 'coalesced'}
         if not client:
             with Catalog(root) as catalog:
-                captured = capture_providers(catalog, home, producer, pi_home=pi_home,
+                captured = capture_providers(catalog, home, producer, pi_home=pi_home, hermes_dbs=hermes_dbs,
                                         providers_config=providers_config, archive_raw=archive_raw,
                                         chunk_raw=chunk_raw, incremental=incremental, max_bytes=max_bytes,
                                         reserve_bytes=reserve_bytes)
@@ -73,7 +74,7 @@ def sync_once(root: Path, home: Path, producer: str, *, client=None,
             if remaining == 0:
                 captured = {'status': 'deferred', 'reason': 'backlog_byte_budget'}
             else:
-                captured = capture_providers(queue, home, producer, pi_home=pi_home,
+                captured = capture_providers(queue, home, producer, pi_home=pi_home, hermes_dbs=hermes_dbs,
                                         providers_config=providers_config, archive_raw=archive_raw,
                                         chunk_raw=chunk_raw, incremental=incremental, max_bytes=min(max_bytes, remaining),
                                         reserve_bytes=reserve_bytes)

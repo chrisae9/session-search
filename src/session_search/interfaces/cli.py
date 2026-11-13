@@ -140,7 +140,7 @@ def parser() -> argparse.ArgumentParser:
     sync_credentials.add_argument("--remote-registry", required=True)
     sync_credentials.add_argument("--remote-executable", required=True)
     sync_credentials.add_argument("--receipt", type=Path, required=True)
-    capture = commands.add_parser("capture", help="capture complete Codex records locally")
+    capture = commands.add_parser("capture", help="capture revisions from enabled session providers")
     capture.add_argument("--codex-home", type=Path,
                          default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
     capture.add_argument("--producer", required=True, help="stable identity of this installation")
@@ -149,7 +149,7 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--chunk-raw", action="store_true",
                          help="share raw archival or staging chunks; requires --archive-raw")
     capture.add_argument("--max-bytes", type=int,
-                         help="bound changed source bytes per run; excess work remains uncaptured")
+                         help="bound changed file bytes or Hermes payload bytes per run")
     capture.add_argument("--reserve-bytes", type=int, default=64 * 1024 * 1024,
                          help="free-space reserve after estimated capture staging")
     capture.add_argument("--force", action="store_true",
@@ -172,6 +172,9 @@ def parser() -> argparse.ArgumentParser:
     search.add_argument("--all-sources", action="store_true")
     capture.add_argument("--pi-home", type=Path, help="Pi agent directory containing sessions")
     sync.add_argument("--pi-home", type=Path, help="Pi agent directory containing sessions")
+    for command in (capture, sync):
+        command.add_argument("--hermes-db", action="append", metavar="PROFILE=PATH",
+                             help="explicit Hermes profile database; repeat for additional profiles")
     search.add_argument("--literal", action="store_true")
     search.add_argument("--role", choices=["user", "assistant"])
     for option in ("after", "before", "project", "session-id", "producer"):
@@ -394,7 +397,8 @@ def main(argv=None) -> int:
                                max_bytes=args.max_bytes, max_pending_bytes=args.max_pending_bytes,
                                reserve_bytes=args.reserve_bytes, archive_raw=args.archive_raw,
                                chunk_raw=args.chunk_raw, incremental=args.incremental, flush_limit=args.flush_limit,
-                               pi_home=args.pi_home, providers_config=args.providers_config)
+                               pi_home=args.pi_home, hermes_dbs=args.hermes_db,
+                               providers_config=args.providers_config)
             print(canonical_json(output))
             return 0
         if args.command == "flush":
@@ -431,7 +435,8 @@ def main(argv=None) -> int:
                           "local_capture_sync": capture_status(args.data_dir)}
             elif args.command == "capture":
                 output = capture_providers(catalog, args.codex_home, args.producer,
-                                      pi_home=args.pi_home, providers_config=args.providers_config, archive_raw=args.archive_raw,
+                                      pi_home=args.pi_home, hermes_dbs=args.hermes_db,
+                                      providers_config=args.providers_config, archive_raw=args.archive_raw,
                                       force=args.force, chunk_raw=args.chunk_raw, incremental=args.incremental,
                                   max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             elif args.command == "search":
@@ -474,7 +479,8 @@ def remote_command(args, client: Client) -> dict:
     if args.command == "capture":
         with UploadQueue(args.data_dir) as queue:
             result = capture_providers(queue, args.codex_home, args.producer,
-                                  pi_home=args.pi_home, providers_config=args.providers_config, archive_raw=args.archive_raw,
+                                  pi_home=args.pi_home, hermes_dbs=args.hermes_db,
+                                  providers_config=args.providers_config, archive_raw=args.archive_raw,
                                   force=args.force, chunk_raw=args.chunk_raw, incremental=args.incremental,
                                   max_bytes=args.max_bytes, reserve_bytes=args.reserve_bytes)
             result["queue"] = queue.status()

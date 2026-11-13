@@ -288,8 +288,11 @@ def create_app(data_dir: Path, credentials: Path, *, readonly: bool = False,
             if not prior and current not in {data["expected_revision"], revision.revision}:
                 catalog.db.rollback()
                 raise HTTPException(409, "session revision conflict; reconcile before retry")
+            # A Hermes edit can return to an earlier snapshot. The head check
+            # above authorizes that transition; retrying an old receipt cannot.
             result = catalog.ingest(revision, producer=request.state.producer,
-                                    request_id=data["request_id"], raw=data.get("raw"))
+                                    request_id=data["request_id"], raw=data.get("raw"),
+                                    reactivate=revision.source == "hermes")
             return {"version": 1, "status": "durable", **result}
 
     @app.post("/v1/migration-heads")

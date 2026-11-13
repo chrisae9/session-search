@@ -1,6 +1,6 @@
 """Transactional canonical revisions and targeted lexical reads.
 
-Historical evidence is immutable. Only the per-session search head moves forward;
+Historical evidence is immutable. Only the per-session search head changes;
 source disappearance has no corresponding write operation.
 """
 
@@ -186,7 +186,9 @@ class Catalog:
         self.close()
 
     def ingest(self, session: SessionRevision, *, producer: str, request_id: str,
-               checkpoint: tuple[str, str] | None = None, raw: dict | None = None) -> dict:
+               checkpoint: tuple[str, str] | None = None, raw: dict | None = None,
+               reactivate: bool = False) -> dict:
+        """Publish a revision; authoritative captures may restore a known head."""
         if self.readonly:
             raise PermissionError("standby is read-only")
         if not producer or not request_id:
@@ -198,6 +200,8 @@ class Catalog:
             if not objects.verify(raw["digest"]) or objects.size(raw["digest"]) != raw["size"]:
                 raise ValueError("raw evidence must be durable and verified before acknowledgement")
         with self.db:
+            if reactivate and not self.db.in_transaction:
+                self.db.execute("BEGIN IMMEDIATE")
             prior = self.db.execute(
                 "SELECT session_id,revision FROM receipts WHERE producer=? AND request_id=?",
                 (producer, request_id),
@@ -206,22 +210,18 @@ class Catalog:
                 if (prior["session_id"], prior["revision"]) != (session.session_id, revision):
                     raise ValueError("idempotency key reused for different content")
                 return {"session_id": session.session_id, "revision": revision, "duplicate": True}
-            exists = self.db.execute(
+            existing = self.db.execute(
                 "SELECT 1 FROM revisions WHERE session_id=? AND revision=?",
                 (session.session_id, revision),
             ).fetchone()
-            if not exists:
+            if not existing:
                 previous_head = self.db.execute(
                     "SELECT r.revision,r.source,r.project,r.parser_version "
                     "FROM revisions r JOIN heads h USING(session_id,revision) "
                     "WHERE r.session_id=?", (session.session_id,),
                 ).fetchone()
-                previous_rows = {row[0] for row in self.db.execute(
-                    "SELECT event_row FROM active_events WHERE session_id=?", (session.session_id,)
-                )}
-                self.db.execute("DELETE FROM active_events WHERE session_id=?", (session.session_id,))
                 event_ids = []
-                for index, event in enumerate(session.events):
+                for event in session.events:
                     content_hash = digest(canonical_json({"session_id": session.session_id,
                                                           **asdict(event)}).encode())
                     self.db.execute(
@@ -233,13 +233,6 @@ class Catalog:
                     row_id = self.db.execute("SELECT row_id FROM evidence WHERE content_hash=?",
                                               (content_hash,)).fetchone()[0]
                     event_ids.append(row_id)
-                    if row_id not in previous_rows:
-                        self.db.execute("INSERT INTO evidence_fts(rowid,text) VALUES (?,?)",
-                                        (row_id, event.text))
-                    self.db.execute("INSERT INTO active_events VALUES (?,?,?)",
-                                    (session.session_id, index, row_id))
-                self.db.executemany("DELETE FROM evidence_fts WHERE rowid=?",
-                                    ((row_id,) for row_id in previous_rows - set(event_ids)))
                 self.db.execute(
                     "INSERT INTO revisions(session_id,revision,source,project,title,"
                     "parent_session_id,is_subagent,parser_version,event_count,event_map) "
@@ -248,10 +241,7 @@ class Catalog:
                      session.parent_session_id, session.is_subagent, session.parser_version,
                      len(session.events), gzip.compress(canonical_json(event_ids).encode(), mtime=0)),
                 )
-                self.db.execute(
-                    "INSERT INTO heads VALUES (?,?) ON CONFLICT(session_id) "
-                    "DO UPDATE SET revision=excluded.revision", (session.session_id, revision),
-                )
+                self._activate_revision(session.session_id, revision, event_ids)
                 # Legacy imports label projects with slugs; native capture uses
                 # paths. Bind the migration label to this exact native project.
                 if (previous_head and previous_head["source"] == session.source == "codex"
@@ -264,6 +254,12 @@ class Catalog:
                         (session.session_id, session.project, previous_head["project"],
                          previous_head["revision"], revision),
                     )
+            elif reactivate and not self.db.execute(
+                "SELECT 1 FROM heads WHERE session_id=? AND revision=?",
+                (session.session_id, revision),
+            ).fetchone():
+                self._activate_revision(session.session_id, revision,
+                                        self.revision_event_ids(session.session_id, revision))
             self.db.execute("INSERT OR IGNORE INTO producers VALUES (?,?,?)",
                             (session.session_id, revision, producer))
             self.db.execute("INSERT INTO receipts VALUES (?,?,?,?)",
@@ -280,7 +276,23 @@ class Catalog:
                                 (session.session_id, revision, raw["digest"], raw["size"],
                                  raw["path"], raw["fingerprint"]))
             self.bump_publication()
-        return {"session_id": session.session_id, "revision": revision, "duplicate": bool(exists)}
+        return {"session_id": session.session_id, "revision": revision, "duplicate": bool(existing)}
+
+    def _activate_revision(self, session_id: str, revision: str, event_ids: list[int]) -> None:
+        previous = {row[0] for row in self.db.execute(
+            "SELECT event_row FROM active_events WHERE session_id=?", (session_id,)
+        )}
+        current = set(event_ids)
+        self.db.execute("DELETE FROM active_events WHERE session_id=?", (session_id,))
+        self.db.executemany("INSERT INTO active_events VALUES (?,?,?)",
+                            ((session_id, index, row_id) for index, row_id in enumerate(event_ids)))
+        self.db.executemany("DELETE FROM evidence_fts WHERE rowid=?",
+                            ((row_id,) for row_id in previous - current))
+        self.db.executemany("INSERT INTO evidence_fts(rowid,text) "
+                            "SELECT row_id,text FROM evidence WHERE row_id=?",
+                            ((row_id,) for row_id in current - previous))
+        self.db.execute("INSERT INTO heads VALUES (?,?) ON CONFLICT(session_id) "
+                        "DO UPDATE SET revision=excluded.revision", (session_id, revision))
 
     def bump_publication(self):
         self.db.execute("UPDATE publication_state SET epoch=epoch+1 WHERE id=1")
@@ -300,7 +312,7 @@ class Catalog:
                                (path, fingerprint)).fetchone() is not None
 
     def source_defaults(self):
-        defaults = {"pi": True, "pi-legacy": True}
+        defaults = {"pi": True, "pi-legacy": True, "hermes": True}
         if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='source_defaults'").fetchone():
             defaults.update({("pi-legacy" if r[0] == "pi-dev" else r[0]): bool(r[1])
                              for r in self.db.execute(
